@@ -1,16 +1,14 @@
-# Source files (only include compiled output)
+# Source files - only include compiled output
 src/
 *.ts
 !*.d.ts
 tsconfig.json
 
-# Development dependencies and configs
+# Development files
 .eslintrc*
 .prettierrc*
 jest.config.*
 .babelrc*
-webpack.config.*
-rollup.config.*
 
 # Test files
 test/
@@ -28,14 +26,12 @@ coverage/
 .idea/
 *.swp
 *.swo
-*~
 
-# Build tools
+# Build cache
 .tsbuildinfo
 *.tsbuildinfo
 
 # Git files
-.git/
 .gitignore
 .gitattributes
 
@@ -44,81 +40,28 @@ coverage/
 .github/
 .gitlab-ci.yml
 .circleci/
-.azure-pipelines.yml
-.jenkins/
-
-# Documentation (optional - you may want to include README.md)
-docs/
-*.md
-!README.md
-
-# Logs and runtime data
-logs/
-*.log
-pids/
-*.pid
-*.seed
-*.pid.lock
-
-# Temporary files
-tmp/
-temp/
-.cache/
-.parcel-cache/
-
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.npm
-.yarn-integrity
-
-# Environment files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Optional files
-.eslintcache
-.rpt2_cache/
-.rts2_cache_cjs/
-.rts2_cache_es/
-.rts2_cache_umd/
-
-# Backup files
-*.bak
-*.backup
-*.orig
-
-# Editor files
-*.sublime-project
-*.sublime-workspace
 
 # Development scripts
 scripts/dev/
 scripts/test/
 .husky/
 
-# Lock files (optional - some prefer to include them)
-package-lock.json
-yarn.lock
+# Logs
+*.log
+logs/
 
-# TypeScript incremental compilation
-*.tsbuildinfo
+# OS files
+.DS_Store
+Thumbs.db
 
-# Build artifacts that shouldn't be published
-build/
-dist/*.map
-dist/*.ts
+# Node development files
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env*
+
+# Source maps (optional - keep compiled JS but not source maps)
+*.map
