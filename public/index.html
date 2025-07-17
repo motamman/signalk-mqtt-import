@@ -424,7 +424,7 @@
         // Refresh status information
         async function refreshStatus() {
             try {
-                const response = await fetch('/plugins/zennora-signalk-mqtt-import/api/mqtt-status');
+                const response = await fetch('/plugins/signalk-mqtt-import/api/mqtt-status');
                 const data = await response.json();
                 
                 if (data.success) {
@@ -433,7 +433,7 @@
                 }
                 
                 // Get statistics
-                const statsResponse = await fetch('/plugins/zennora-signalk-mqtt-import/api/stats');
+                const statsResponse = await fetch('/plugins/signalk-mqtt-import/api/stats');
                 const statsData = await statsResponse.json();
                 
                 if (statsData.success) {
@@ -451,7 +451,7 @@
         // Refresh import rules
         async function refreshRules() {
             try {
-                const response = await fetch('/plugins/zennora-signalk-mqtt-import/api/rules');
+                const response = await fetch('/plugins/signalk-mqtt-import/api/rules');
                 const data = await response.json();
                 
                 if (data.success) {
@@ -578,7 +578,7 @@
         // Save rules to server
         async function saveRules() {
             try {
-                const response = await fetch('/plugins/zennora-signalk-mqtt-import/api/rules', {
+                const response = await fetch('/plugins/signalk-mqtt-import/api/rules', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -601,7 +601,7 @@
         // Test MQTT connection
         async function testMQTT() {
             try {
-                const response = await fetch('/plugins/zennora-signalk-mqtt-import/api/test-mqtt', {
+                const response = await fetch('/plugins/signalk-mqtt-import/api/test-mqtt', {
                     method: 'POST'
                 });
                 

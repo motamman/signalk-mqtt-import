@@ -542,7 +542,7 @@ export = function(app: SignalKApp): SignalKPlugin {
       {
         id: 'vessels-all-data',
         name: 'All Vessel Data (Auto-detect Self)',
-        mqttTopic: 'vessels/urn_mrn_imo_mmsi_+/#',
+        mqttTopic: 'vessels/+/#',
         signalKContext: '', // Will be extracted from topic (auto-detect self)
         signalKPath: '', // Will be extracted from topic
         sourceLabel: '',
@@ -554,7 +554,7 @@ export = function(app: SignalKApp): SignalKPlugin {
       {
         id: 'vessels-navigation',
         name: 'Navigation Data (All Vessels)',
-        mqttTopic: 'vessels/urn_mrn_imo_mmsi_+/navigation/#',
+        mqttTopic: 'vessels/+/navigation/#',
         signalKContext: '', // Will be extracted from topic (auto-detect self)
         signalKPath: '', // Will be extracted from topic
         sourceLabel: '',
@@ -566,7 +566,7 @@ export = function(app: SignalKApp): SignalKPlugin {
       {
         id: 'vessels-environment',
         name: 'Environment Data (All Vessels)',
-        mqttTopic: 'vessels/urn_mrn_imo_mmsi_+/environment/#',
+        mqttTopic: 'vessels/+/environment/#',
         signalKContext: '', // Will be extracted from topic (auto-detect self)
         signalKPath: '', // Will be extracted from topic
         sourceLabel: '',
@@ -578,7 +578,7 @@ export = function(app: SignalKApp): SignalKPlugin {
       {
         id: 'vessels-electrical',
         name: 'Electrical Data (All Vessels)',
-        mqttTopic: 'vessels/urn_mrn_imo_mmsi_+/electrical/#',
+        mqttTopic: 'vessels/+/electrical/#',
         signalKContext: '', // Will be extracted from topic (auto-detect self)
         signalKPath: '', // Will be extracted from topic
         sourceLabel: '',
@@ -590,7 +590,7 @@ export = function(app: SignalKApp): SignalKPlugin {
       {
         id: 'vessels-propulsion',
         name: 'Propulsion Data (All Vessels)',
-        mqttTopic: 'vessels/urn_mrn_imo_mmsi_+/propulsion/#',
+        mqttTopic: 'vessels/+/propulsion/#',
         signalKContext: '', // Will be extracted from topic (auto-detect self)
         signalKPath: '', // Will be extracted from topic
         sourceLabel: '',
