@@ -229,50 +229,8 @@ export = function(app: SignalKApp): SignalKPlugin {
         // First check if topic matches the pattern
         let matches = false;
         
-        // Support wildcard matching with URN format flexibility
-        if (expectedTopic.includes('#')) {
-          const prefix = expectedTopic.replace('#', '');
-          
-          // Handle vessels/self/* patterns
-          if (prefix.includes('vessels/self/') && state.selfVesselUrn) {
-            const urnPrefix = prefix.replace('vessels/self/', `vessels/${state.selfVesselUrn}/`);
-            const underscoreUrn = urnToMqttFormat(state.selfVesselUrn);
-            const underscorePrefix = underscoreUrn ? prefix.replace('vessels/self/', `vessels/${underscoreUrn}/`) : null;
-            matches = topic.startsWith(prefix) || topic.startsWith(urnPrefix) || 
-                     (underscorePrefix ? topic.startsWith(underscorePrefix) : false);
-            app.debug(`🔍 vessels/self matching: ${matches} (tried: ${prefix}, ${urnPrefix}, ${underscorePrefix})`);
-          } else {
-            matches = topic.startsWith(prefix) || topic.startsWith(prefix.replace(/_/g, ':'));
-          }
-        } else if (expectedTopic.includes('+')) {
-          // Handle vessels/self/* patterns
-          if (expectedTopic.includes('vessels/self/') && state.selfVesselUrn) {
-            const urnPattern = expectedTopic.replace('vessels/self/', `vessels/${state.selfVesselUrn}/`);
-            const underscoreUrn = urnToMqttFormat(state.selfVesselUrn);
-            const underscorePattern = underscoreUrn ? expectedTopic.replace('vessels/self/', `vessels/${underscoreUrn}/`) : null;
-            const selfRegex = new RegExp(expectedTopic.replace(/\+/g, '[^/]+'));
-            const urnRegex = new RegExp(urnPattern.replace(/\+/g, '[^/]+'));
-            const underscoreRegex = underscorePattern ? new RegExp(underscorePattern.replace(/\+/g, '[^/]+')) : null;
-            matches = selfRegex.test(topic) || urnRegex.test(topic) || 
-                     (underscoreRegex ? underscoreRegex.test(topic) : false);
-          } else {
-            // Create regex patterns for both underscore and colon formats
-            const underscoreRegex = new RegExp(expectedTopic.replace(/\+/g, '[^/]+'));
-            const colonRegex = new RegExp(expectedTopic.replace(/_/g, ':').replace(/\+/g, '[^/]+'));
-            matches = underscoreRegex.test(topic) || colonRegex.test(topic);
-          }
-        } else {
-          // Handle vessels/self/* patterns
-          if (expectedTopic.includes('vessels/self/') && state.selfVesselUrn) {
-            const urnTopic = expectedTopic.replace('vessels/self/', `vessels/${state.selfVesselUrn}/`);
-            const underscoreUrn = urnToMqttFormat(state.selfVesselUrn);
-            const underscoreTopic = underscoreUrn ? expectedTopic.replace('vessels/self/', `vessels/${underscoreUrn}/`) : null;
-            matches = topic === expectedTopic || topic === urnTopic || 
-                     (underscoreTopic ? topic === underscoreTopic : false);
-          } else {
-            matches = topic === expectedTopic || topic === expectedTopic.replace(/_/g, ':');
-          }
-        }
+        // Use proper MQTT wildcard matching
+        matches = mqttTopicMatches(topic, expectedTopic, state.selfVesselUrn);
         
         // If topic matches, check if MMSI should be excluded
         if (matches && isMMSIExcluded(topic, r)) {
@@ -428,6 +386,45 @@ export = function(app: SignalKApp): SignalKPlugin {
   function parseMMSIExclusionList(excludeMMSI: string): string[] {
     if (!excludeMMSI || typeof excludeMMSI !== 'string') return [];
     return excludeMMSI.split(',').map(mmsi => mmsi.trim()).filter(mmsi => mmsi.length > 0);
+  }
+
+  // Helper function to match MQTT topics with wildcard patterns
+  function mqttTopicMatches(topic: string, pattern: string, selfVesselUrn?: string | null): boolean {
+    // Handle vessels/self/* patterns by expanding to all possible formats
+    if (pattern.includes('vessels/self/') && selfVesselUrn) {
+      // Create patterns for URN format and underscore format
+      const urnPattern = pattern.replace('vessels/self/', `vessels/${selfVesselUrn}/`);
+      const underscoreUrn = urnToMqttFormat(selfVesselUrn);
+      const underscorePattern = pattern.replace('vessels/self/', `vessels/${underscoreUrn}/`);
+      
+      // Test against all possible patterns
+      return mqttTopicMatches(topic, pattern.replace('vessels/self/', 'vessels/+/')) ||
+             mqttTopicMatches(topic, urnPattern) ||
+             (underscoreUrn ? mqttTopicMatches(topic, underscorePattern) : false);
+    }
+    
+    // Convert MQTT pattern to regex pattern
+    let regexPattern = pattern
+      .replace(/\+/g, '[^/]+')  // + matches any characters except /
+      .replace(/#$/, '.*')      // # at end matches everything
+      .replace(/#\//, '.*/');   // # in middle matches everything up to next /
+    
+    // Also handle URN format conversion (underscore to colon)
+    const colonPattern = pattern.replace(/urn_mrn_imo_mmsi_/g, 'urn:mrn:imo:mmsi:');
+    let colonRegexPattern = '';
+    if (colonPattern !== pattern) {
+      colonRegexPattern = colonPattern
+        .replace(/\+/g, '[^/]+')
+        .replace(/#$/, '.*')
+        .replace(/#\//, '.*/');
+    }
+    
+    // Create regex objects with anchors
+    const regex = new RegExp(`^${regexPattern}$`);
+    const colonRegex = colonRegexPattern ? new RegExp(`^${colonRegexPattern}$`) : null;
+    
+    // Test both underscore and colon formats
+    return regex.test(topic) || (colonRegex ? colonRegex.test(topic) : false);
   }
 
   // Helper function to check if MMSI should be excluded
