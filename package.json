@@ -1,7 +1,7 @@
 {
   "name": "signalk-mqtt-import",
   "version": "0.5.0-alpha.2",
-  "description": "SignalK plugin to selectively import data from MQTT with webapp management interface (TypeScript)",
+  "description": "SignalK plugin to selectively import data from MQTT with webapp management interface",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
