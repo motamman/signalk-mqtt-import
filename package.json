@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc --project .",
+    "build": "tsc",
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build",
@@ -61,5 +61,12 @@
     "compatibility": ">=2.13.0",
     "displayName": "SignalK MQTT Import Manager",
     "appIcon": "mqtt_import.png"
-  }
+  },
+  "files": [
+    "dist/**/*",
+    "src/**/*",
+    "public/**/*",
+    "tsconfig.json",
+    "README.md"
+  ]
 }
