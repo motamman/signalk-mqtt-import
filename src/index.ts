@@ -26,24 +26,25 @@ import {
   ContextExtractionResult,
   MMSIExclusionResult,
   DefaultRuleConfig,
-  PayloadFormat
+  PayloadFormat,
 } from './types';
 
 // Global plugin state
 let appInstance: SignalKApp;
 
-export = function(app: SignalKApp): SignalKPlugin {
+export = function (app: SignalKApp): SignalKPlugin {
   // Store app instance for global access
   appInstance = app;
-  
+
   const plugin: SignalKPlugin = {
     id: 'signalk-mqtt-import',
     name: 'SignalK MQTT Import Manager',
-    description: 'Selectively import SignalK data from MQTT with webapp management interface',
+    description:
+      'Selectively import SignalK data from MQTT with webapp management interface',
     schema: {},
     start: () => {},
     stop: () => {},
-    registerWithRouter: undefined
+    registerWithRouter: undefined,
   };
 
   // Plugin state
@@ -53,36 +54,40 @@ export = function(app: SignalKApp): SignalKPlugin {
     lastReceivedMessages: new Map<string, number>(),
     selfVesselUrn: null,
     rulesFilePath: null,
-    currentConfig: undefined
+    currentConfig: undefined,
   };
 
-  plugin.start = function(options: Partial<MQTTImportConfig>): void {
+  plugin.start = function (options: Partial<MQTTImportConfig>): void {
     app.debug('Starting SignalK MQTT Import Manager plugin');
-    
+
     const config: MQTTImportConfig = {
       mqttBroker: options?.mqttBroker || 'mqtt://localhost:1883',
       mqttClientId: options?.mqttClientId || 'signalk-mqtt-import',
       mqttUsername: options?.mqttUsername || '',
       mqttPassword: options?.mqttPassword || '',
       topicPrefix: options?.topicPrefix || '',
-      enabled: options?.enabled !== false
+      enabled: options?.enabled !== false,
     };
 
     state.currentConfig = config;
     plugin.config = config;
-    
+
     // Load rules from persistent storage (or migrate from old config)
     const migratedRules = migrateOldConfiguration(options as any);
     state.importRules = migratedRules || loadRulesFromStorage();
-    
-    app.debug(`Loaded ${state.importRules.length} import rules from persistent storage`);
+
+    app.debug(
+      `Loaded ${state.importRules.length} import rules from persistent storage`
+    );
 
     // Get self vessel URN for proper context mapping
     try {
       state.selfVesselUrn = app.selfId || app.getSelfPath('uuid');
       app.debug(`Self vessel URN: ${state.selfVesselUrn}`);
     } catch (error) {
-      app.debug(`Warning: Could not get self vessel URN: ${(error as Error).message}`);
+      app.debug(
+        `Warning: Could not get self vessel URN: ${(error as Error).message}`
+      );
     }
 
     if (!config.enabled) {
@@ -96,9 +101,9 @@ export = function(app: SignalKApp): SignalKPlugin {
     app.debug('SignalK MQTT Import Manager plugin started');
   };
 
-  plugin.stop = function(): void {
+  plugin.stop = function (): void {
     app.debug('Stopping SignalK MQTT Import Manager plugin');
-    
+
     // Disconnect MQTT client
     if (state.mqttClient) {
       state.mqttClient.end();
@@ -116,7 +121,7 @@ export = function(app: SignalKApp): SignalKPlugin {
         clientId: config.mqttClientId,
         clean: true,
         reconnectPeriod: 5000,
-        keepalive: 60
+        keepalive: 60,
       };
 
       if (config.mqttUsername && config.mqttPassword) {
@@ -146,9 +151,10 @@ export = function(app: SignalKApp): SignalKPlugin {
       state.mqttClient.on('message', (topic: string, message: Buffer) => {
         handleMQTTMessage(topic, message);
       });
-
     } catch (error) {
-      app.debug(`Failed to initialize MQTT client: ${(error as Error).message}`);
+      app.debug(
+        `Failed to initialize MQTT client: ${(error as Error).message}`
+      );
     }
   }
 
@@ -160,40 +166,50 @@ export = function(app: SignalKApp): SignalKPlugin {
 
     // Get all unique topics from enabled import rules
     const topics = new Set<string>();
-    state.importRules.filter(rule => rule.enabled).forEach(rule => {
-      let topic = rule.mqttTopic;
-      
-      // Add topic prefix if configured
-      if (state.currentConfig?.topicPrefix) {
-        topic = `${state.currentConfig.topicPrefix}/${topic}`;
-      }
-      
-      // Handle vessels/self/* topics by converting to actual URN format
-      if (topic.includes('vessels/self/') && state.selfVesselUrn) {
-        // Convert vessels/self/* to actual URN format for MQTT subscription
-        const urnTopic = topic.replace('vessels/self/', `vessels/${state.selfVesselUrn}/`);
-        topics.add(urnTopic);
-        app.debug(`Converted vessels/self rule to URN topic: ${urnTopic}`);
-        // Also add underscore format if URN contains colons
-        if (state.selfVesselUrn.includes(':')) {
-          const underscoreUrn = urnToMqttFormat(state.selfVesselUrn);
-          const underscoreTopic = topic.replace('vessels/self/', `vessels/${underscoreUrn}/`);
-          topics.add(underscoreTopic);
-          app.debug(`Also added underscore format: ${underscoreTopic}`);
+    state.importRules
+      .filter(rule => rule.enabled)
+      .forEach(rule => {
+        let topic = rule.mqttTopic;
+
+        // Add topic prefix if configured
+        if (state.currentConfig?.topicPrefix) {
+          topic = `${state.currentConfig.topicPrefix}/${topic}`;
         }
-      } else {
-        // Add both underscore and colon formats for URN topics
-        topics.add(topic);
-        if (topic.includes('urn_mrn_imo_mmsi_')) {
-          topics.add(topic.replace(/urn_mrn_imo_mmsi_/g, 'urn:mrn:imo:mmsi:'));
+
+        // Handle vessels/self/* topics by converting to actual URN format
+        if (topic.includes('vessels/self/') && state.selfVesselUrn) {
+          // Convert vessels/self/* to actual URN format for MQTT subscription
+          const urnTopic = topic.replace(
+            'vessels/self/',
+            `vessels/${state.selfVesselUrn}/`
+          );
+          topics.add(urnTopic);
+          app.debug(`Converted vessels/self rule to URN topic: ${urnTopic}`);
+          // Also add underscore format if URN contains colons
+          if (state.selfVesselUrn.includes(':')) {
+            const underscoreUrn = urnToMqttFormat(state.selfVesselUrn);
+            const underscoreTopic = topic.replace(
+              'vessels/self/',
+              `vessels/${underscoreUrn}/`
+            );
+            topics.add(underscoreTopic);
+            app.debug(`Also added underscore format: ${underscoreTopic}`);
+          }
+        } else {
+          // Add both underscore and colon formats for URN topics
+          topics.add(topic);
+          if (topic.includes('urn_mrn_imo_mmsi_')) {
+            topics.add(
+              topic.replace(/urn_mrn_imo_mmsi_/g, 'urn:mrn:imo:mmsi:')
+            );
+          }
         }
-      }
-    });
+      });
 
     // Subscribe to all topics
     app.debug(`📡 Subscribing to ${topics.size} MQTT topics...`);
     topics.forEach(topic => {
-      state.mqttClient!.subscribe(topic, { qos: 1 }, (err) => {
+      state.mqttClient!.subscribe(topic, { qos: 1 }, err => {
         if (err) {
           app.debug(`❌ Failed to subscribe to ${topic}: ${err.message}`);
         } else {
@@ -209,36 +225,40 @@ export = function(app: SignalKApp): SignalKPlugin {
   function handleMQTTMessage(topic: string, message: Buffer): void {
     try {
       const messageStr = message.toString();
-      
+
       // Debug: Log incoming message
       app.debug(`📥 Received MQTT message on topic: ${topic}`);
-      
+
       // Find matching import rule (that doesn't exclude this MMSI)
       let rule: ImportRule | null = null;
       for (const r of state.importRules) {
         if (!r.enabled) continue;
-        
+
         let expectedTopic = r.mqttTopic;
         if (state.currentConfig?.topicPrefix) {
           expectedTopic = `${state.currentConfig.topicPrefix}/${expectedTopic}`;
         }
-        
+
         // Debug: Log rule matching attempt
-        app.debug(`🔍 Checking rule "${r.name}" with pattern: ${expectedTopic}`);
-        
+        app.debug(
+          `🔍 Checking rule "${r.name}" with pattern: ${expectedTopic}`
+        );
+
         // First check if topic matches the pattern
         let matches = false;
-        
+
         // Use proper MQTT wildcard matching
         matches = mqttTopicMatches(topic, expectedTopic, state.selfVesselUrn);
-        
+
         // If topic matches, check if MMSI should be excluded
         if (matches && isMMSIExcluded(topic, r)) {
           const mmsi = extractMMSIFromUrn(topic.split('/')[1]);
-          app.debug(`🔍 Rule "${r.name}" matches but MMSI ${mmsi} is excluded - continuing search`);
+          app.debug(
+            `🔍 Rule "${r.name}" matches but MMSI ${mmsi} is excluded - continuing search`
+          );
           continue; // Continue looking for other rules
         }
-        
+
         // If this rule matches and doesn't exclude, use it
         if (matches) {
           rule = r;
@@ -250,7 +270,7 @@ export = function(app: SignalKApp): SignalKPlugin {
         app.debug(`❌ No import rule found for topic: ${topic}`);
         return;
       }
-      
+
       app.debug(`✅ Rule matched: "${rule.name}" for topic: ${topic}`);
 
       // Check for duplicate messages if enabled
@@ -260,7 +280,7 @@ export = function(app: SignalKApp): SignalKPlugin {
           return; // Skip duplicate message
         }
         state.lastReceivedMessages.set(messageKey, Date.now());
-        
+
         // Clean up old messages (keep last 1000 messages)
         if (state.lastReceivedMessages.size > 1000) {
           const entries = Array.from(state.lastReceivedMessages.entries());
@@ -283,17 +303,22 @@ export = function(app: SignalKApp): SignalKPlugin {
       } else {
         app.debug(`⚠️ Failed to parse message for topic: ${topic}`);
       }
-
     } catch (error) {
-      app.debug(`Error handling MQTT message from ${topic}: ${(error as Error).message}`);
+      app.debug(
+        `Error handling MQTT message from ${topic}: ${(error as Error).message}`
+      );
     }
   }
 
   // Parse value-only message format
-  function parseValueOnlyMessage(messageStr: string, rule: ImportRule, topic: string): SignalKDelta | null {
+  function parseValueOnlyMessage(
+    messageStr: string,
+    rule: ImportRule,
+    topic: string
+  ): SignalKDelta | null {
     try {
       let value: any;
-      
+
       // Try to parse as JSON first
       try {
         value = JSON.parse(messageStr);
@@ -303,59 +328,79 @@ export = function(app: SignalKApp): SignalKPlugin {
       }
 
       // Extract context and path from topic or rule configuration
-      const context = rule.signalKContext || extractContextFromTopic(topic, rule);
+      const context =
+        rule.signalKContext || extractContextFromTopic(topic, rule);
       const path = rule.signalKPath || extractPathFromTopic(topic, rule);
 
       return {
-        context: context,
-        updates: [{
-          source: {
-            label: rule.sourceLabel || '',
-            type: 'mqtt'
+        context: context as any,
+        updates: [
+          {
+            source: {
+              label: rule.sourceLabel || '',
+              type: 'mqtt',
+            },
+            timestamp: new Date().toISOString() as any,
+            values: [
+              {
+                path: path as any,
+                value: value,
+              },
+            ],
           },
-          timestamp: new Date().toISOString(),
-          values: [{
-            path: path,
-            value: value
-          }]
-        }]
+        ],
       };
     } catch (error) {
-      app.debug(`Error parsing value-only message: ${(error as Error).message}`);
+      app.debug(
+        `Error parsing value-only message: ${(error as Error).message}`
+      );
       return null;
     }
   }
 
   // Parse full SignalK message format
-  function parseFullSignalKMessage(messageStr: string, rule: ImportRule, topic: string): SignalKDelta | null {
+  function parseFullSignalKMessage(
+    messageStr: string,
+    rule: ImportRule,
+    topic: string
+  ): SignalKDelta | null {
     try {
       const parsed = JSON.parse(messageStr);
-      
+
       // If it's already a proper SignalK delta, use it directly
       if (parsed.context && parsed.updates) {
         return parsed as SignalKDelta;
       }
-      
+
       // Otherwise, try to construct a SignalK delta
-      const context = rule.signalKContext || parsed.context || extractContextFromTopic(topic, rule);
+      const context =
+        rule.signalKContext ||
+        parsed.context ||
+        extractContextFromTopic(topic, rule);
       const path = rule.signalKPath || extractPathFromTopic(topic, rule);
-      
+
       return {
-        context: context,
-        updates: [{
-          source: {
-            label: rule.sourceLabel || '',
-            type: 'mqtt'
+        context: context as any,
+        updates: [
+          {
+            source: {
+              label: rule.sourceLabel || '',
+              type: 'mqtt',
+            },
+            timestamp: new Date().toISOString() as any,
+            values: [
+              {
+                path: path as any,
+                value: parsed,
+              },
+            ],
           },
-          timestamp: new Date().toISOString(),
-          values: [{
-            path: path,
-            value: parsed
-          }]
-        }]
+        ],
       };
     } catch (error) {
-      app.debug(`Error parsing full SignalK message: ${(error as Error).message}`);
+      app.debug(
+        `Error parsing full SignalK message: ${(error as Error).message}`
+      );
       return null;
     }
   }
@@ -385,32 +430,53 @@ export = function(app: SignalKApp): SignalKPlugin {
   // Helper function to parse MMSI exclusion list
   function parseMMSIExclusionList(excludeMMSI: string): string[] {
     if (!excludeMMSI || typeof excludeMMSI !== 'string') return [];
-    return excludeMMSI.split(',').map(mmsi => mmsi.trim()).filter(mmsi => mmsi.length > 0);
+    return excludeMMSI
+      .split(',')
+      .map(mmsi => mmsi.trim())
+      .filter(mmsi => mmsi.length > 0);
   }
 
   // Helper function to match MQTT topics with wildcard patterns
-  function mqttTopicMatches(topic: string, pattern: string, selfVesselUrn?: string | null): boolean {
+  function mqttTopicMatches(
+    topic: string,
+    pattern: string,
+    selfVesselUrn?: string | null
+  ): boolean {
     // Handle vessels/self/* patterns by expanding to all possible formats
     if (pattern.includes('vessels/self/') && selfVesselUrn) {
       // Create patterns for URN format and underscore format
-      const urnPattern = pattern.replace('vessels/self/', `vessels/${selfVesselUrn}/`);
+      const urnPattern = pattern.replace(
+        'vessels/self/',
+        `vessels/${selfVesselUrn}/`
+      );
       const underscoreUrn = urnToMqttFormat(selfVesselUrn);
-      const underscorePattern = pattern.replace('vessels/self/', `vessels/${underscoreUrn}/`);
-      
+      const underscorePattern = pattern.replace(
+        'vessels/self/',
+        `vessels/${underscoreUrn}/`
+      );
+
       // Test against all possible patterns
-      return mqttTopicMatches(topic, pattern.replace('vessels/self/', 'vessels/+/')) ||
-             mqttTopicMatches(topic, urnPattern) ||
-             (underscoreUrn ? mqttTopicMatches(topic, underscorePattern) : false);
+      return (
+        mqttTopicMatches(
+          topic,
+          pattern.replace('vessels/self/', 'vessels/+/')
+        ) ||
+        mqttTopicMatches(topic, urnPattern) ||
+        (underscoreUrn ? mqttTopicMatches(topic, underscorePattern) : false)
+      );
     }
-    
+
     // Convert MQTT pattern to regex pattern
     let regexPattern = pattern
-      .replace(/\+/g, '[^/]+')  // + matches any characters except /
-      .replace(/#$/, '.*')      // # at end matches everything
-      .replace(/#\//, '.*/');   // # in middle matches everything up to next /
-    
+      .replace(/\+/g, '[^/]+') // + matches any characters except /
+      .replace(/#$/, '.*') // # at end matches everything
+      .replace(/#\//, '.*/'); // # in middle matches everything up to next /
+
     // Also handle URN format conversion (underscore to colon)
-    const colonPattern = pattern.replace(/urn_mrn_imo_mmsi_/g, 'urn:mrn:imo:mmsi:');
+    const colonPattern = pattern.replace(
+      /urn_mrn_imo_mmsi_/g,
+      'urn:mrn:imo:mmsi:'
+    );
     let colonRegexPattern = '';
     if (colonPattern !== pattern) {
       colonRegexPattern = colonPattern
@@ -418,11 +484,13 @@ export = function(app: SignalKApp): SignalKPlugin {
         .replace(/#$/, '.*')
         .replace(/#\//, '.*/');
     }
-    
+
     // Create regex objects with anchors
     const regex = new RegExp(`^${regexPattern}$`);
-    const colonRegex = colonRegexPattern ? new RegExp(`^${colonRegexPattern}$`) : null;
-    
+    const colonRegex = colonRegexPattern
+      ? new RegExp(`^${colonRegexPattern}$`)
+      : null;
+
     // Test both underscore and colon formats
     return regex.test(topic) || (colonRegex ? colonRegex.test(topic) : false);
   }
@@ -431,22 +499,24 @@ export = function(app: SignalKApp): SignalKPlugin {
   function isMMSIExcluded(topic: string, rule: ImportRule): boolean {
     const exclusionList = parseMMSIExclusionList(rule.excludeMMSI || '');
     if (exclusionList.length === 0) return false;
-    
+
     // Extract vessel ID from topic
     const parts = topic.split('/');
     if (parts.length < 2 || parts[0] !== 'vessels') return false;
-    
+
     const vesselId = parts[1];
     const mmsi = extractMMSIFromUrn(vesselId);
-    
+
     if (!mmsi) return false;
-    
+
     const isExcluded = exclusionList.includes(mmsi);
-    
+
     if (isExcluded) {
-      app.debug(`MMSI ${mmsi} excluded by rule "${rule.name}" for topic: ${topic}`);
+      app.debug(
+        `MMSI ${mmsi} excluded by rule "${rule.name}" for topic: ${topic}`
+      );
     }
-    
+
     return isExcluded;
   }
 
@@ -455,30 +525,37 @@ export = function(app: SignalKApp): SignalKPlugin {
     // Remove prefix if present
     let cleanTopic = topic;
     if (state.currentConfig?.topicPrefix) {
-      cleanTopic = cleanTopic.replace(`${state.currentConfig.topicPrefix}/`, '');
+      cleanTopic = cleanTopic.replace(
+        `${state.currentConfig.topicPrefix}/`,
+        ''
+      );
     }
 
     const parts = cleanTopic.split('/');
-    
+
     if (parts[0] === 'vessels' && parts.length > 2) {
       const vesselId = parts[1];
-      
+
       // Check if this is the self vessel's URN (handle both formats)
-      if (state.selfVesselUrn && (urnToMqttFormat(state.selfVesselUrn) === vesselId || state.selfVesselUrn === vesselId)) {
+      if (
+        state.selfVesselUrn &&
+        (urnToMqttFormat(state.selfVesselUrn) === vesselId ||
+          state.selfVesselUrn === vesselId)
+      ) {
         return 'vessels.self';
       }
-      
+
       // Handle URN format (both underscore and colon)
       if (vesselId.startsWith('urn_')) {
         return `vessels.${mqttFormatToUrn(vesselId)}`;
       } else if (vesselId.startsWith('urn:')) {
         return `vessels.${vesselId}`;
       }
-      
+
       // Handle other formats
       return `vessels.${vesselId}`;
     }
-    
+
     // Fallback to vessels.self
     return 'vessels.self';
   }
@@ -488,18 +565,21 @@ export = function(app: SignalKApp): SignalKPlugin {
     // Remove prefix if present
     let cleanTopic = topic;
     if (state.currentConfig?.topicPrefix) {
-      cleanTopic = cleanTopic.replace(`${state.currentConfig.topicPrefix}/`, '');
+      cleanTopic = cleanTopic.replace(
+        `${state.currentConfig.topicPrefix}/`,
+        ''
+      );
     }
 
     // Default path extraction: convert topic to SignalK path
     // e.g., "vessels/self/navigation/position" -> "navigation.position"
     const parts = cleanTopic.split('/');
-    
+
     // Remove context parts (vessels/self or vessels/urn_...)
     if (parts[0] === 'vessels' && parts.length > 2) {
       return parts.slice(2).join('.');
     }
-    
+
     // Fallback: use the entire topic as path
     return cleanTopic.replace(/\//g, '.');
   }
@@ -508,7 +588,11 @@ export = function(app: SignalKApp): SignalKPlugin {
   function sendToSignalK(signalKData: SignalKDelta, rule: ImportRule): void {
     try {
       // Validate the data structure
-      if (!signalKData.context || !signalKData.updates || !Array.isArray(signalKData.updates)) {
+      if (
+        !signalKData.context ||
+        !signalKData.updates ||
+        !Array.isArray(signalKData.updates)
+      ) {
         app.debug('Invalid SignalK data structure');
         return;
       }
@@ -516,8 +600,8 @@ export = function(app: SignalKApp): SignalKPlugin {
       // Apply any transformations if configured
       if (rule.transformValue && typeof rule.transformValue === 'function') {
         signalKData.updates.forEach(update => {
-          if (update.values) {
-            update.values.forEach(valueUpdate => {
+          if ((update as any).values) {
+            (update as any).values.forEach((valueUpdate: any) => {
               valueUpdate.value = rule.transformValue!(valueUpdate.value);
             });
           }
@@ -525,9 +609,11 @@ export = function(app: SignalKApp): SignalKPlugin {
       }
 
       // Send to SignalK
-      app.handleMessage(plugin.id, signalKData);
-      
-      app.debug(`✅ Imported to SignalK: ${signalKData.context} - ${signalKData.updates.length} updates`);
+      app.handleMessage(plugin.id, signalKData as any);
+
+      app.debug(
+        `✅ Imported to SignalK: ${signalKData.context} - ${signalKData.updates.length} updates`
+      );
     } catch (error) {
       app.debug(`Error sending to SignalK: ${(error as Error).message}`);
     }
@@ -546,7 +632,7 @@ export = function(app: SignalKApp): SignalKPlugin {
         enabled: true,
         payloadFormat: 'full',
         ignoreDuplicates: true,
-        excludeMMSI: ''
+        excludeMMSI: '',
       },
       {
         id: 'vessels-navigation',
@@ -558,7 +644,7 @@ export = function(app: SignalKApp): SignalKPlugin {
         enabled: true,
         payloadFormat: 'full',
         ignoreDuplicates: true,
-        excludeMMSI: ''
+        excludeMMSI: '',
       },
       {
         id: 'vessels-environment',
@@ -570,7 +656,7 @@ export = function(app: SignalKApp): SignalKPlugin {
         enabled: true,
         payloadFormat: 'full',
         ignoreDuplicates: true,
-        excludeMMSI: ''
+        excludeMMSI: '',
       },
       {
         id: 'vessels-electrical',
@@ -582,7 +668,7 @@ export = function(app: SignalKApp): SignalKPlugin {
         enabled: false, // Disabled by default
         payloadFormat: 'full',
         ignoreDuplicates: true,
-        excludeMMSI: ''
+        excludeMMSI: '',
       },
       {
         id: 'vessels-propulsion',
@@ -594,8 +680,8 @@ export = function(app: SignalKApp): SignalKPlugin {
         enabled: false, // Disabled by default
         payloadFormat: 'full',
         ignoreDuplicates: true,
-        excludeMMSI: ''
-      }
+        excludeMMSI: '',
+      },
     ];
   }
 
@@ -604,97 +690,136 @@ export = function(app: SignalKApp): SignalKPlugin {
     if (state.mqttClient && state.mqttClient.connected) {
       // Unsubscribe from all topics first
       state.mqttClient.unsubscribe('#');
-      
+
       // Re-subscribe based on current rules
       subscribeToMQTTTopics();
     }
   }
 
   // Plugin webapp routes
-  plugin.registerWithRouter = function(router: Router): void {
+  plugin.registerWithRouter = function (router: Router): void {
     const express = require('express');
-    
+
     app.debug('registerWithRouter called for MQTT import manager');
-    
+
     // API Routes
-    
+
     // Get current import rules
-    router.get('/api/rules', (_: TypedRequest, res: TypedResponse<RulesApiResponse>) => {
-      res.json({
-        success: true,
-        rules: state.importRules,
-        mqttConnected: state.mqttClient ? state.mqttClient.connected : false
-      });
-    });
+    router.get(
+      '/api/rules',
+      (_: TypedRequest, res: TypedResponse<RulesApiResponse>) => {
+        res.json({
+          success: true,
+          rules: state.importRules,
+          mqttConnected: state.mqttClient ? state.mqttClient.connected : false,
+        });
+      }
+    );
 
     // Update import rules
-    router.post('/api/rules', (req: TypedRequest<RuleUpdateRequest>, res: TypedResponse<ApiResponse>) => {
-      try {
-        const newRules = req.body.rules;
-        if (!Array.isArray(newRules)) {
-          return res.status(400).json({ success: false, error: 'Rules must be an array' });
-        }
+    router.post(
+      '/api/rules',
+      (
+        req: TypedRequest<RuleUpdateRequest>,
+        res: TypedResponse<ApiResponse>
+      ) => {
+        try {
+          const newRules = req.body.rules;
+          if (!Array.isArray(newRules)) {
+            return res
+              .status(400)
+              .json({ success: false, error: 'Rules must be an array' });
+          }
 
-        state.importRules = newRules;
-        
-        // Save rules to persistent storage
-        if (saveRulesToStorage(newRules)) {
-          // Update MQTT subscriptions with new rules
-          updateMQTTSubscriptions();
-          
-          res.json({ success: true, message: 'Import rules updated and saved to persistent storage' });
-        } else {
-          res.status(500).json({ success: false, error: 'Failed to save rules to persistent storage' });
+          state.importRules = newRules;
+
+          // Save rules to persistent storage
+          if (saveRulesToStorage(newRules)) {
+            // Update MQTT subscriptions with new rules
+            updateMQTTSubscriptions();
+
+            res.json({
+              success: true,
+              message: 'Import rules updated and saved to persistent storage',
+            });
+          } else {
+            res.status(500).json({
+              success: false,
+              error: 'Failed to save rules to persistent storage',
+            });
+          }
+        } catch (error) {
+          res
+            .status(500)
+            .json({ success: false, error: (error as Error).message });
         }
-      } catch (error) {
-        res.status(500).json({ success: false, error: (error as Error).message });
       }
-    });
+    );
 
     // Get MQTT connection status
-    router.get('/api/mqtt-status', (_: TypedRequest, res: TypedResponse<MQTTStatusApiResponse>) => {
-      res.json({
-        success: true,
-        connected: state.mqttClient ? state.mqttClient.connected : false,
-        broker: state.currentConfig?.mqttBroker,
-        clientId: state.currentConfig?.mqttClientId
-      });
-    });
+    router.get(
+      '/api/mqtt-status',
+      (_: TypedRequest, res: TypedResponse<MQTTStatusApiResponse>) => {
+        res.json({
+          success: true,
+          connected: state.mqttClient ? state.mqttClient.connected : false,
+          broker: state.currentConfig?.mqttBroker,
+          clientId: state.currentConfig?.mqttClientId,
+        });
+      }
+    );
 
     // Test MQTT connection
-    router.post('/api/test-mqtt', (_: TypedRequest, res: TypedResponse<ApiResponse>) => {
-      try {
-        if (!state.mqttClient || !state.mqttClient.connected) {
-          return res.status(503).json({ success: false, error: 'MQTT not connected' });
-        }
+    router.post(
+      '/api/test-mqtt',
+      (_: TypedRequest, res: TypedResponse<ApiResponse>) => {
+        try {
+          if (!state.mqttClient || !state.mqttClient.connected) {
+            return res
+              .status(503)
+              .json({ success: false, error: 'MQTT not connected' });
+          }
 
-        res.json({ success: true, message: 'MQTT connection is active and receiving messages' });
-      } catch (error) {
-        res.status(500).json({ success: false, error: (error as Error).message });
+          res.json({
+            success: true,
+            message: 'MQTT connection is active and receiving messages',
+          });
+        } catch (error) {
+          res
+            .status(500)
+            .json({ success: false, error: (error as Error).message });
+        }
       }
-    });
+    );
 
     // Get import statistics
-    router.get('/api/stats', (_: TypedRequest, res: TypedResponse<StatsApiResponse>) => {
-      try {
-        const stats = {
-          totalRules: state.importRules.length,
-          enabledRules: state.importRules.filter(r => r.enabled).length,
-          messagesReceived: state.lastReceivedMessages.size,
-          mqttConnected: state.mqttClient ? state.mqttClient.connected : false
-        };
-        
-        res.json({ success: true, stats: stats });
-      } catch (error) {
-        res.status(500).json({ success: false, error: (error as Error).message });
+    router.get(
+      '/api/stats',
+      (_: TypedRequest, res: TypedResponse<StatsApiResponse>) => {
+        try {
+          const stats = {
+            totalRules: state.importRules.length,
+            enabledRules: state.importRules.filter(r => r.enabled).length,
+            messagesReceived: state.lastReceivedMessages.size,
+            mqttConnected: state.mqttClient
+              ? state.mqttClient.connected
+              : false,
+          };
+
+          res.json({ success: true, stats: stats });
+        } catch (error) {
+          res
+            .status(500)
+            .json({ success: false, error: (error as Error).message });
+        }
       }
-    });
+    );
 
     // Serve static files
     const publicPath = path.join(__dirname, '../public');
     if (fs.existsSync(publicPath)) {
       router.use(express.static(publicPath));
-      app.debug('Static files served from:', publicPath);
+      app.debug(`Static files served from: ${publicPath}`);
     }
 
     app.debug('MQTT Import Manager web routes registered');
@@ -708,39 +833,40 @@ export = function(app: SignalKApp): SignalKPlugin {
         type: 'boolean',
         title: 'Enable MQTT Import',
         description: 'Enable/disable the MQTT import functionality',
-        default: true
+        default: true,
       },
       mqttBroker: {
         type: 'string',
         title: 'MQTT Broker URL',
-        description: 'MQTT broker connection string (e.g., mqtt://localhost:1883)',
-        default: 'mqtt://localhost:1883'
+        description:
+          'MQTT broker connection string (e.g., mqtt://localhost:1883)',
+        default: 'mqtt://localhost:1883',
       },
       mqttClientId: {
         type: 'string',
         title: 'MQTT Client ID',
         description: 'Unique client identifier for MQTT connection',
-        default: 'signalk-mqtt-import'
+        default: 'signalk-mqtt-import',
       },
       mqttUsername: {
         type: 'string',
         title: 'MQTT Username',
         description: 'Username for MQTT authentication (optional)',
-        default: ''
+        default: '',
       },
       mqttPassword: {
         type: 'string',
         title: 'MQTT Password',
         description: 'Password for MQTT authentication (optional)',
-        default: ''
+        default: '',
       },
       topicPrefix: {
         type: 'string',
         title: 'Topic Prefix',
         description: 'Optional prefix for all MQTT topics',
-        default: ''
+        default: '',
       },
-    }
+    },
   };
 
   // Persistent storage functions
@@ -760,7 +886,9 @@ export = function(app: SignalKApp): SignalKPlugin {
         return JSON.parse(data) as ImportRule[];
       }
     } catch (error) {
-      app.debug(`Error loading rules from storage: ${(error as Error).message}`);
+      app.debug(
+        `Error loading rules from storage: ${(error as Error).message}`
+      );
     }
     return getDefaultImportRules();
   }
@@ -780,7 +908,9 @@ export = function(app: SignalKApp): SignalKPlugin {
   function migrateOldConfiguration(options: any): ImportRule[] | null {
     // Migrate rules from old plugin config if they exist
     if (options.importRules && Array.isArray(options.importRules)) {
-      app.debug('Migrating import rules from plugin configuration to persistent storage');
+      app.debug(
+        'Migrating import rules from plugin configuration to persistent storage'
+      );
       saveRulesToStorage(options.importRules);
       return options.importRules;
     }

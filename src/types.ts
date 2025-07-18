@@ -1,27 +1,28 @@
 import { Request, Response, Router } from 'express';
 import { MqttClient } from 'mqtt';
+import {
+  ServerAPI,
+  Plugin,
+  Delta,
+  Update,
+  PathValue,
+  Context,
+  Path,
+  Timestamp,
+} from '@signalk/server-api';
 
-// SignalK App Interface
-export interface SignalKApp {
-  debug: (message: string, ...args: any[]) => void;
-  error: (message: string, ...args: any[]) => void;
-  getSelfPath: (path: string) => any;
-  getDataDirPath: () => string;
-  selfContext: string;
-  selfId?: string;
-  handleMessage: (pluginId: string, delta: SignalKDelta) => void;
-}
+// Re-export SignalK types for convenience
+export type SignalKApp = ServerAPI;
+export type SignalKDelta = Delta;
+export type SignalKUpdate = Update;
+export type SignalKValue = PathValue;
+export type SignalKContext = Context;
+export type SignalKPath = Path;
+export type SignalKTimestamp = Timestamp;
 
-// SignalK Plugin Interface
-export interface SignalKPlugin {
-  id: string;
-  name: string;
-  description: string;
-  schema: any;
+// Extended Plugin interface for our needs
+export interface SignalKPlugin extends Plugin {
   config?: MQTTImportConfig;
-  start: (options: Partial<MQTTImportConfig>) => void;
-  stop: () => void;
-  registerWithRouter?: (router: Router) => void;
 }
 
 // Plugin Configuration
@@ -50,28 +51,7 @@ export interface ImportRule {
 }
 
 // SignalK Data Structures
-export interface SignalKDelta {
-  context: string;
-  updates: SignalKUpdate[];
-}
-
-export interface SignalKUpdate {
-  source?: {
-    label?: string;
-    type?: string;
-    pgn?: number;
-    src?: string;
-  };
-  $source?: string;
-  timestamp: string;
-  values: SignalKValue[];
-}
-
-export interface SignalKValue {
-  path: string;
-  value: any;
-  meta?: any;
-}
+// SignalK types are now imported from @signalk/server-api
 
 // MQTT Related Types
 export interface MQTTConnectionStatus {
@@ -180,9 +160,9 @@ export interface PluginError extends Error {
 
 // Vessel URN Types
 export interface VesselUrn {
-  full: string;        // urn:mrn:imo:mmsi:368396230
-  mqtt: string;        // urn_mrn_imo_mmsi_368396230
-  mmsi: string;        // 368396230
+  full: string; // urn:mrn:imo:mmsi:368396230
+  mqtt: string; // urn_mrn_imo_mmsi_368396230
+  mmsi: string; // 368396230
   isSelf: boolean;
 }
 
