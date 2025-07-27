@@ -1,15 +1,13 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { Router } from 'express';
-import { connect, MqttClient } from 'mqtt';
+import { connect } from 'mqtt';
 import {
   SignalKApp,
   SignalKPlugin,
   MQTTImportConfig,
   ImportRule,
   SignalKDelta,
-  SignalKUpdate,
-  SignalKValue,
   PluginState,
   TypedRequest,
   TypedResponse,
@@ -19,23 +17,11 @@ import {
   ApiResponse,
   RuleUpdateRequest,
   MQTTClientOptions,
-  TopicParseResult,
-  MessageProcessingResult,
-  RuleMatchResult,
-  VesselUrn,
-  ContextExtractionResult,
-  MMSIExclusionResult,
-  DefaultRuleConfig,
-  PayloadFormat,
 } from './types';
 
 // Global plugin state
-let appInstance: SignalKApp;
 
 export = function (app: SignalKApp): SignalKPlugin {
-  // Store app instance for global access
-  appInstance = app;
-
   const plugin: SignalKPlugin = {
     id: 'signalk-mqtt-import',
     name: 'SignalK MQTT Import Manager',
@@ -328,9 +314,8 @@ export = function (app: SignalKApp): SignalKPlugin {
       }
 
       // Extract context and path from topic or rule configuration
-      const context =
-        rule.signalKContext || extractContextFromTopic(topic, rule);
-      const path = rule.signalKPath || extractPathFromTopic(topic, rule);
+      const context = rule.signalKContext || extractContextFromTopic(topic);
+      const path = rule.signalKPath || extractPathFromTopic(topic);
 
       return {
         context: context as any,
@@ -374,10 +359,8 @@ export = function (app: SignalKApp): SignalKPlugin {
 
       // Otherwise, try to construct a SignalK delta
       const context =
-        rule.signalKContext ||
-        parsed.context ||
-        extractContextFromTopic(topic, rule);
-      const path = rule.signalKPath || extractPathFromTopic(topic, rule);
+        rule.signalKContext || parsed.context || extractContextFromTopic(topic);
+      const path = rule.signalKPath || extractPathFromTopic(topic);
 
       return {
         context: context as any,
@@ -521,7 +504,7 @@ export = function (app: SignalKApp): SignalKPlugin {
   }
 
   // Extract SignalK context from MQTT topic
-  function extractContextFromTopic(topic: string, rule: ImportRule): string {
+  function extractContextFromTopic(topic: string): string {
     // Remove prefix if present
     let cleanTopic = topic;
     if (state.currentConfig?.topicPrefix) {
@@ -561,7 +544,7 @@ export = function (app: SignalKApp): SignalKPlugin {
   }
 
   // Extract SignalK path from MQTT topic
-  function extractPathFromTopic(topic: string, rule: ImportRule): string {
+  function extractPathFromTopic(topic: string): string {
     // Remove prefix if present
     let cleanTopic = topic;
     if (state.currentConfig?.topicPrefix) {
