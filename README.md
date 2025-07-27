@@ -1,18 +1,14 @@
-# SignalK MQTT Import Manager (TypeScript)
+# SignalK MQTT Import Manager
 
-**Version 0.5.0-alpha.2**
+**Version 0.5.0-beta.1**
 
-A comprehensive SignalK plugin that provides a web-based interface for managing selective import of SignalK data from MQTT brokers, now fully converted to TypeScript. This plugin serves as the inverse of the MQTT Export plugin, allowing you to import data from MQTT topics back into SignalK.
+A comprehensive SignalK plugin and webapp provides a web-based interface for managing selective import of SignalK data from MQTT brokers. This plugin serves as the inverse of the MQTT Export plugin, allowing you to import data from MQTT topics back into SignalK.
 
-## 🎯 TypeScript Conversion
+***THIS REQUIRES A SEPARATELY INSTALLED MQTT BROKER***
 
-This is a complete TypeScript conversion of the original JavaScript plugin, providing:
+Both have been tested with a local and remote Mosquitto broker. I run a local broker which bridges to the remote broker when I have connectivity on the boat. (I also have several DIY sensors that send to a broker regardless of whether the Signal K is running and use this plugin to import the sensor payloads.) This assumes that the payload has a fully formed delta complete with a path, $source, timestamp and value.
 
-- **📝 Type Safety**: Full TypeScript typing throughout the codebase
-- **🔍 Better IDE Support**: Enhanced autocomplete, error detection, and refactoring
-- **🏗️ Improved Architecture**: Well-defined interfaces and data structures
-- **📚 Better Documentation**: Type definitions serve as living documentation
-- **⚡ Performance**: Optimized compilation and runtime performance
+This was adapted from a Node-RED flow that was running on my RPI for the last 18 months. I switched to this because Node-RED was starting to eat up reseources as my flows became more numerous and complex.
 
 ## Features
 
@@ -20,14 +16,18 @@ This is a complete TypeScript conversion of the original JavaScript plugin, prov
 - **📋 Rule Management**: Create, edit, enable/disable import rules
 - **🎯 Selective Import**: Import only the data you need with flexible topic filtering
 - **📊 Real-time Status**: Monitor MQTT connection and message statistics
-- **🔄 Dynamic Updates**: Changes take effect immediately without restart
-- **💾 Persistent Configuration**: Rules are saved to dedicated storage and survive restarts
 - **🏷️ Flexible Topic Mapping**: Support for MQTT topic wildcards and auto-extraction of SignalK paths
-- **📦 Multiple Formats**: Support for full SignalK structure or value-only payloads
+- **📦 Multiple Formats**: Support for object and value-only payloads
 - **🔍 Duplicate Filtering**: Optionally ignore duplicate messages to reduce SignalK updates
 - **🏷️ Source Labeling**: Customize source labels for imported data
 
 ## Installation
+
+### Method: NPM Installation
+```bash
+npm install signalk-mqtt-import
+sudo systemctl restart signalk
+```
 
 ### Method: NPM Installation from GitHub repo
 ```bash
@@ -87,7 +87,7 @@ Navigate to **SignalK Admin → Server → Plugin Config → SignalK MQTT Import
 ## Web Interface
 
 Access the management interface at:
-- **https://your-signalk-server:3443/plugins/signalk-mqtt-import/**
+- **http://your-signalk-server:3000/plugins/signalk-mqtt-import/**
 
 ### Interface Features
 
@@ -136,23 +136,12 @@ The plugin automatically detects when MQTT topics reference the self vessel:
 
 ## TypeScript Features
 
-### Type Safety
-- **Strict Typing**: All functions, variables, and API endpoints are fully typed
-- **Interface Definitions**: Comprehensive interfaces for all data structures
-- **Error Prevention**: Compile-time error detection prevents runtime issues
-
 ### Key Interfaces
 - `ImportRule`: Import rule configuration
 - `MQTTImportConfig`: Plugin configuration
 - `SignalKDelta`: SignalK delta message structure
 - `ApiResponse<T>`: Generic API response typing
 - `PluginState`: Internal plugin state management
-
-### Development Benefits
-- **IntelliSense**: Full IDE support with autocomplete and type hints
-- **Refactoring**: Safe refactoring with type-aware tools
-- **Documentation**: Types serve as executable documentation
-- **Testing**: Better unit testing with type-aware mocking
 
 ## Default Import Rules
 
@@ -238,48 +227,51 @@ This allows you to:
 Expected format matches the output of the MQTT Export plugin:
 ```json
 {
-  "context": "vessels.self",
-  "updates": [{
-    "source": {
-      "label": "GPS",
-      "type": "NMEA2000"
-    },
-    "timestamp": "2025-07-15T10:30:00.000Z",
-    "values": [{
-      "path": "navigation.position",
-      "value": {
-        "latitude": 37.7749,
-        "longitude": -122.4194,
-        "altitude": 0
-      }
-    }]
-  }]
+  "context": "vessels.urn:mrn:imo:mmsi:368396230",
+  "updates": [
+    {
+      "source": {
+        "sentence": "GLL",
+        "talker": "GN",
+        "type": "NMEA0183",
+        "label": "maiana"
+      },
+      "$source": "maiana.GN",
+      "timestamp": "2025-07-27T18:31:14.000Z",
+      "values": [
+        {
+          "path": "navigation.position",
+          "value": {
+            "longitude": -72.08771,
+            "latitude": 41.32969833333333
+          }
+        }
+      ]
+    }
+  ]
 }
 ```
 
-### Value Only
-Simple value format:
+or 
+
 ```json
 {
-  "latitude": 37.7749,
-  "longitude": -122.4194,
-  "altitude": 0
+  "context": "vessels.urn:mrn:imo:mmsi:368396230",
+  "updates": [
+    {
+      "$source": "zennora-weatherflow-derived",
+      "timestamp": "2025-07-27T18:38:08.152Z",
+      "values": [
+        {
+          "path": "environment.wind.speedApparent",
+          "value": 3.97
+        }
+      ]
+    }
+  ]
 }
 ```
 
-Or simple values:
-```
-123.45
-```
-
-## Migration from JavaScript Version
-
-If you're upgrading from the JavaScript version:
-
-1. **Backup Configuration**: Export your current rules via the web interface
-2. **Install TypeScript Version**: Follow installation instructions above
-3. **Import Configuration**: Rules should migrate automatically, but verify in web interface
-4. **Test Functionality**: Verify all rules work as expected
 
 ## Troubleshooting
 
@@ -322,10 +314,14 @@ MIT License - See [LICENSE](../LICENSE) file for details.
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes with proper TypeScript typing
-4. Test thoroughly
-5. Submit a pull request
+4. Submit a pull request
 
 ## Changelog
+
+### v0.5.0-beta.1 (Beta Release)
+- **📝 Improved documentation** with formatted JSON examples for better readability
+- **🔄 Version bump** to beta status indicating stable feature set
+- **✨ Ready for broader testing** with all core features implemented
 
 ### v0.5.0-alpha.2 (TypeScript Conversion)
 - **🎯 Complete TypeScript conversion** with full type safety
