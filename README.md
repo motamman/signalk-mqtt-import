@@ -87,7 +87,7 @@ Navigate to **SignalK Admin → Server → Plugin Config → SignalK MQTT Import
 ## Web Interface
 
 Access the management interface at:
-- **http://your-signalk-server:3000/plugins/signalk-mqtt-import/**
+- **http://your-signalk-server:3000/signalk-mqtt-import/**
 
 ### Interface Features
 
