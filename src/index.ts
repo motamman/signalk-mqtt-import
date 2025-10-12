@@ -612,7 +612,7 @@ export = function (app: SignalKApp): SignalKPlugin {
         signalKContext: '', // Will be extracted from topic (auto-detect self)
         signalKPath: '', // Will be extracted from topic
         sourceLabel: '',
-        enabled: true,
+        enabled: false, // Disabled by default
         payloadFormat: 'full',
         ignoreDuplicates: true,
         excludeMMSI: '',
@@ -636,7 +636,7 @@ export = function (app: SignalKApp): SignalKPlugin {
         signalKContext: '', // Will be extracted from topic (auto-detect self)
         signalKPath: '', // Will be extracted from topic
         sourceLabel: '',
-        enabled: true,
+        enabled: false, // Disabled by default
         payloadFormat: 'full',
         ignoreDuplicates: true,
         excludeMMSI: '',
