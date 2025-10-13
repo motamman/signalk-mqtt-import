@@ -352,7 +352,11 @@ export = function (app: SignalKApp): SignalKPlugin {
       const jsonObject = JSON.parse(messageStr);
 
       // Ensure it's an object (not array or primitive)
-      if (typeof jsonObject !== 'object' || jsonObject === null || Array.isArray(jsonObject)) {
+      if (
+        typeof jsonObject !== 'object' ||
+        jsonObject === null ||
+        Array.isArray(jsonObject)
+      ) {
         app.debug('JSON object format requires a valid JSON object');
         return null;
       }
@@ -840,14 +844,17 @@ export = function (app: SignalKApp): SignalKPlugin {
     // Test send to SignalK
     router.post(
       '/api/test-send',
-      (req: TypedRequest<{ delta: SignalKDelta }>, res: TypedResponse<ApiResponse>) => {
+      (
+        req: TypedRequest<{ delta: SignalKDelta }>,
+        res: TypedResponse<ApiResponse>
+      ) => {
         try {
           const { delta } = req.body;
 
           if (!delta || !delta.context || !delta.updates) {
             return res.status(400).json({
               success: false,
-              error: 'Invalid delta structure'
+              error: 'Invalid delta structure',
             });
           }
 
@@ -866,7 +873,7 @@ export = function (app: SignalKApp): SignalKPlugin {
 
           res.json({
             success: true,
-            message: `Sent ${pathCount} path(s) to SignalK`
+            message: `Sent ${pathCount} path(s) to SignalK`,
           });
         } catch (error) {
           res
