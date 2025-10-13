@@ -279,6 +279,8 @@ export = function (app: SignalKApp): SignalKPlugin {
       let signalKData: SignalKDelta | null;
       if (rule.payloadFormat === 'value-only') {
         signalKData = parseValueOnlyMessage(messageStr, rule, topic);
+      } else if (rule.payloadFormat === 'json-object') {
+        signalKData = parseJsonObjectMessage(messageStr, rule, topic);
       } else {
         signalKData = parseFullSignalKMessage(messageStr, rule, topic);
       }
@@ -338,6 +340,52 @@ export = function (app: SignalKApp): SignalKPlugin {
     } catch (error) {
       app.debug(
         `Error parsing value-only message: ${(error as Error).message}`
+      );
+      return null;
+    }
+  }
+
+  // Parse JSON object message format - each key becomes a separate path
+  function parseJsonObjectMessage(
+    messageStr: string,
+    rule: ImportRule,
+    topic: string
+  ): SignalKDelta | null {
+    try {
+      const jsonObject = JSON.parse(messageStr);
+
+      // Ensure it's an object (not array or primitive)
+      if (typeof jsonObject !== 'object' || jsonObject === null || Array.isArray(jsonObject)) {
+        app.debug('JSON object format requires a valid JSON object');
+        return null;
+      }
+
+      // Extract base context and path from topic or rule configuration
+      const context = rule.signalKContext || extractContextFromTopic(topic);
+      const basePath = rule.signalKPath || extractPathFromTopic(topic);
+
+      // Create a value entry for each key in the JSON object
+      const values = Object.entries(jsonObject).map(([key, value]) => ({
+        path: `${basePath}.${key}` as any,
+        value: value as any,
+      }));
+
+      return {
+        context: context as any,
+        updates: [
+          {
+            source: {
+              label: rule.sourceLabel || '',
+              type: 'mqtt',
+            },
+            timestamp: new Date().toISOString() as any,
+            values: values,
+          },
+        ],
+      };
+    } catch (error) {
+      app.debug(
+        `Error parsing JSON object message: ${(error as Error).message}`
       );
       return null;
     }
@@ -790,6 +838,45 @@ export = function (app: SignalKApp): SignalKPlugin {
           };
 
           res.json({ success: true, stats: stats });
+        } catch (error) {
+          res
+            .status(500)
+            .json({ success: false, error: (error as Error).message });
+        }
+      }
+    );
+
+    // Test send to SignalK
+    router.post(
+      '/api/test-send',
+      (req: TypedRequest<{ delta: SignalKDelta }>, res: TypedResponse<ApiResponse>) => {
+        try {
+          const { delta } = req.body;
+
+          if (!delta || !delta.context || !delta.updates) {
+            return res.status(400).json({
+              success: false,
+              error: 'Invalid delta structure'
+            });
+          }
+
+          // Send to SignalK
+          app.handleMessage(plugin.id, delta as any);
+
+          app.debug(`Test payload sent to SignalK: ${JSON.stringify(delta)}`);
+
+          // Count total paths sent
+          let pathCount = 0;
+          delta.updates.forEach((update: any) => {
+            if (update.values && Array.isArray(update.values)) {
+              pathCount += update.values.length;
+            }
+          });
+
+          res.json({
+            success: true,
+            message: `Sent ${pathCount} path(s) to SignalK`
+          });
         } catch (error) {
           res
             .status(500)

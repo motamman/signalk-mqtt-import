@@ -44,7 +44,7 @@ export interface ImportRule {
   signalKPath: string;
   sourceLabel: string;
   enabled: boolean;
-  payloadFormat: 'full' | 'value-only';
+  payloadFormat: 'full' | 'value-only' | 'json-object';
   ignoreDuplicates: boolean;
   excludeMMSI?: string;
   transformValue?: (value: any) => any;
@@ -149,7 +149,7 @@ export interface RuleMatchResult {
 }
 
 // Utility Types
-export type PayloadFormat = 'full' | 'value-only';
+export type PayloadFormat = 'full' | 'value-only' | 'json-object';
 export type MessageKey = string; // Format: "topic:message"
 
 // Error Types
