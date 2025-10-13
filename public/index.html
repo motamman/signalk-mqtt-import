@@ -891,6 +891,12 @@
             const signalKContext = document.getElementById('ruleSignalKContext').value;
             const signalKPath = document.getElementById('ruleSignalKPath').value;
 
+            // Trim and default source label similar to context and path
+            let sourceLabel = document.getElementById('ruleSourceLabel').value;
+            if (!sourceLabel || sourceLabel.trim() === '') {
+                sourceLabel = 'mqtt-import-test';
+            }
+
             try {
                 let results;
 
@@ -908,6 +914,9 @@
                         results = { error: 'Unknown format' };
                 }
 
+                // Add source label to results
+                results.sourceLabel = sourceLabel;
+
                 displayTestResults(results);
             } catch (error) {
                 resultsDiv.innerHTML = `<div class="test-results error"><strong>Error:</strong> ${error.message}</div>`;
@@ -923,8 +932,21 @@
                 value = isNaN(Number(payload)) ? payload : Number(payload);
             }
 
-            const context = contextOverride || extractContextFromTopicClient(topic);
-            const path = pathOverride || extractPathFromTopicClient(topic);
+            // Use override if provided and not empty, otherwise extract from topic, default to vessels.self
+            let context = contextOverride && contextOverride.trim() !== ''
+                ? contextOverride
+                : extractContextFromTopicClient(topic);
+            if (!context || context.trim() === '') {
+                context = 'vessels.self';
+            }
+
+            // Use override if provided and not empty, otherwise extract from topic, default to test.mqtt
+            let path = pathOverride && pathOverride.trim() !== ''
+                ? pathOverride
+                : extractPathFromTopicClient(topic);
+            if (!path || path.trim() === '') {
+                path = 'test.mqtt';
+            }
 
             return {
                 context: context,
@@ -943,8 +965,21 @@
                 throw new Error('JSON object format requires a valid JSON object (not array or primitive)');
             }
 
-            const context = contextOverride || extractContextFromTopicClient(topic);
-            const basePath = pathOverride || extractPathFromTopicClient(topic);
+            // Use override if provided and not empty, otherwise extract from topic, default to vessels.self
+            let context = contextOverride && contextOverride.trim() !== ''
+                ? contextOverride
+                : extractContextFromTopicClient(topic);
+            if (!context || context.trim() === '') {
+                context = 'vessels.self';
+            }
+
+            // Use override if provided and not empty, otherwise extract from topic, default to test.mqtt
+            let basePath = pathOverride && pathOverride.trim() !== ''
+                ? pathOverride
+                : extractPathFromTopicClient(topic);
+            if (!basePath || basePath.trim() === '') {
+                basePath = 'test.mqtt';
+            }
 
             const paths = Object.entries(jsonObject).map(([key, value]) => ({
                 path: `${basePath}.${key}`,
@@ -1018,6 +1053,10 @@
             let html = '<div class="test-results success">';
             html += `<div style="margin-bottom: 10px;"><strong>Context:</strong> ${results.context}</div>`;
 
+            if (results.sourceLabel) {
+                html += `<div style="margin-bottom: 10px;"><strong>Source:</strong> ${results.sourceLabel}</div>`;
+            }
+
             if (results.fullDelta) {
                 html += '<div style="margin-bottom: 8px; color: #28a745;"><em>Valid SignalK Delta format detected</em></div>';
             }
@@ -1058,7 +1097,12 @@
             const mqttTopic = document.getElementById('ruleMqttTopic').value || 'test/topic';
             const signalKContext = document.getElementById('ruleSignalKContext').value;
             const signalKPath = document.getElementById('ruleSignalKPath').value;
-            const sourceLabel = document.getElementById('ruleSourceLabel').value || 'test';
+
+            // Trim and default source label similar to context and path
+            let sourceLabel = document.getElementById('ruleSourceLabel').value;
+            if (!sourceLabel || sourceLabel.trim() === '') {
+                sourceLabel = 'mqtt-import-test';
+            }
 
             try {
                 // First, parse and display the test results
@@ -1078,6 +1122,9 @@
                         throw new Error('Unknown format');
                 }
 
+                // Add source label to results
+                results.sourceLabel = sourceLabel;
+
                 displayTestResults(results);
 
                 // Build SignalK delta
@@ -1085,10 +1132,7 @@
                     context: results.context,
                     updates: [
                         {
-                            source: {
-                                label: sourceLabel,
-                                type: 'mqtt-test'
-                            },
+                            $source: sourceLabel,
                             timestamp: new Date().toISOString(),
                             values: results.paths.map(p => ({
                                 path: p.path,

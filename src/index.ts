@@ -323,10 +323,7 @@ export = function (app: SignalKApp): SignalKPlugin {
         context: context as any,
         updates: [
           {
-            source: {
-              label: rule.sourceLabel || '',
-              type: 'mqtt',
-            },
+            $source: rule.sourceLabel || 'mqtt-import',
             timestamp: new Date().toISOString() as any,
             values: [
               {
@@ -334,7 +331,7 @@ export = function (app: SignalKApp): SignalKPlugin {
                 value: value,
               },
             ],
-          },
+          } as any,
         ],
       };
     } catch (error) {
@@ -374,13 +371,10 @@ export = function (app: SignalKApp): SignalKPlugin {
         context: context as any,
         updates: [
           {
-            source: {
-              label: rule.sourceLabel || '',
-              type: 'mqtt',
-            },
+            $source: rule.sourceLabel || 'mqtt-import',
             timestamp: new Date().toISOString() as any,
             values: values,
-          },
+          } as any,
         ],
       };
     } catch (error) {
@@ -414,10 +408,7 @@ export = function (app: SignalKApp): SignalKPlugin {
         context: context as any,
         updates: [
           {
-            source: {
-              label: rule.sourceLabel || '',
-              type: 'mqtt',
-            },
+            $source: rule.sourceLabel || 'mqtt-import',
             timestamp: new Date().toISOString() as any,
             values: [
               {
@@ -425,7 +416,7 @@ export = function (app: SignalKApp): SignalKPlugin {
                 value: parsed,
               },
             ],
-          },
+          } as any,
         ],
       };
     } catch (error) {
