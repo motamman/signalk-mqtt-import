@@ -368,6 +368,138 @@
             color: #333;
             margin-left: 8px;
         }
+        /* Payload Mapper Styles */
+        .mapper-input-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .mapper-input-section textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+        .mapping-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 0.85em;
+        }
+        .mapping-table th,
+        .mapping-table td {
+            padding: 8px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+        .mapping-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+        .mapping-table input[type="text"] {
+            width: 100%;
+            padding: 4px 6px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .mapping-table select {
+            padding: 4px 6px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        .path-segments {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            align-items: center;
+        }
+        .path-segment {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+        .path-segment input {
+            width: 80px;
+            padding: 3px 5px;
+            font-size: 11px;
+        }
+        .path-separator {
+            color: #666;
+            font-weight: bold;
+        }
+        .btn-tiny {
+            padding: 2px 6px;
+            font-size: 10px;
+            border-radius: 3px;
+        }
+        .transform-config {
+            display: none;
+            margin-top: 5px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .transform-config.active {
+            display: block;
+        }
+        .transform-config input,
+        .transform-config select {
+            margin: 3px 5px 3px 0;
+        }
+        .value-preview {
+            font-family: monospace;
+            font-size: 11px;
+        }
+        .value-original {
+            color: #666;
+        }
+        .value-transformed {
+            color: #28a745;
+            font-weight: 600;
+        }
+        .mapping-actions {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        .saved-mappings-list {
+            margin-top: 15px;
+        }
+        .mapping-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border: 1px solid #dee2e6;
+        }
+        .mapping-item-info h4 {
+            margin: 0 0 3px 0;
+            font-size: 14px;
+        }
+        .mapping-item-info p {
+            margin: 0;
+            color: #666;
+            font-size: 12px;
+        }
+        .yaml-section {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 2px solid #dee2e6;
+        }
+        .yaml-section h4 {
+            margin: 0 0 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -464,6 +596,101 @@
         </div>
     </div>
 
+    <!-- Payload Mapper -->
+    <div class="card">
+        <h3 onclick="toggleCard(this)">
+            <span>🗺️ Payload Mapper</span>
+            <span class="collapse-icon">▼</span>
+        </h3>
+        <div class="card-content">
+            <p style="margin-top: 0; color: #666;">Create custom mappings to transform JSON payloads (like Zigbee2MQTT) into SignalK paths with value transformations.</p>
+
+            <!-- Input Section -->
+            <div class="mapper-input-section">
+                <div>
+                    <label><strong>MQTT Topic Pattern:</strong></label>
+                    <input type="text" id="mapperTopic" placeholder="e.g., zigbee2mqtt/+" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; margin-top: 5px;">
+                    <small style="color: #666;">Use + for single-level wildcard (captured as {device})</small>
+                </div>
+                <div>
+                    <label><strong>SignalK Context:</strong></label>
+                    <input type="text" id="mapperContext" value="vessels.self" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; margin-top: 5px;">
+                </div>
+            </div>
+
+            <div style="margin-top: 15px;">
+                <label><strong>Sample Topic (for testing):</strong></label>
+                <input type="text" id="mapperSampleTopic" placeholder="e.g., zigbee2mqtt/StateRoomPortHoleStbd2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; margin-top: 5px;">
+                <small style="color: #666;">Enter a sample topic to see how paths will be extracted</small>
+            </div>
+
+            <div style="margin-top: 15px;">
+                <label><strong>Sample JSON Payload:</strong></label>
+                <textarea id="mapperPayload" style="min-height: 300px;" placeholder='Paste a JSON payload to analyze, e.g.:
+{
+  "battery": 100,
+  "contact": true,
+  "device_temperature": 37,
+  "linkquality": 102,
+  "power_outage_count": 10,
+  "trigger_count": 0,
+  "voltage": 3005
+}'></textarea>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <button class="btn btn-success" onclick="parsePayloadForMapping()">🔍 Parse Payload</button>
+                <button class="btn" onclick="clearMappingEditor()">Clear</button>
+            </div>
+
+            <!-- Mapping Editor Table -->
+            <div id="mappingEditorContainer" style="display: none;">
+                <h4 style="margin-top: 20px;">Field Mappings</h4>
+                <table class="mapping-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 30px;"><input type="checkbox" id="selectAllFields" onchange="toggleAllFields(this.checked)" checked></th>
+                            <th>Source Key</th>
+                            <th>SignalK Path</th>
+                            <th>Transform</th>
+                            <th>Original → Transformed</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mappingEditorBody">
+                        <!-- Field rows will be added here -->
+                    </tbody>
+                </table>
+
+                <div class="mapping-actions">
+                    <input type="text" id="mappingName" placeholder="Mapping name (e.g., Zigbee Contact Sensor)" style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; width: 250px;">
+                    <button class="btn btn-success" onclick="saveMappingFromEditor()">💾 Save Mapping</button>
+                    <button class="btn" onclick="testCurrentMapping()">🧪 Test Mapping</button>
+                    <button class="btn btn-warning" onclick="testAndSendMappingToSignalK()">📤 Test & Send to SignalK</button>
+                </div>
+
+                <div id="mappingTestResults" style="margin-top: 15px;"></div>
+            </div>
+
+            <!-- Saved Mappings List -->
+            <div class="saved-mappings-list">
+                <h4>Saved Mappings</h4>
+                <div id="savedMappingsList">
+                    <p style="color: #666;">No mappings saved yet. Create one above.</p>
+                </div>
+                <button class="btn" onclick="refreshMappings()">🔄 Refresh Mappings</button>
+            </div>
+
+            <!-- YAML Export/Import -->
+            <div class="yaml-section">
+                <h4>YAML Export/Import</h4>
+                <p style="color: #666; margin: 5px 0 10px 0;">Export your rules and mappings to YAML for backup or manual editing.</p>
+                <button class="btn" onclick="exportYaml()">📥 Export to YAML</button>
+                <button class="btn" onclick="document.getElementById('yamlFileInput').click()">📤 Import from YAML</button>
+                <input type="file" id="yamlFileInput" accept=".yaml,.yml" style="display: none;" onchange="importYaml(event)">
+            </div>
+        </div>
+    </div>
+
     <!-- Add/Edit Rule Modal -->
     <div id="ruleModal" class="modal">
         <div class="modal-content">
@@ -499,13 +726,22 @@
                 
                 <div class="form-group">
                     <label for="rulePayloadFormat">Payload Format:</label>
-                    <select id="rulePayloadFormat" name="payloadFormat">
+                    <select id="rulePayloadFormat" name="payloadFormat" onchange="toggleCustomMappingSelector()">
                         <option value="full">Full SignalK Structure</option>
                         <option value="value-only">Value Only</option>
                         <option value="json-object">JSON Object (each key becomes a path)</option>
+                        <option value="custom-mapping">Custom Mapping (with transforms)</option>
                     </select>
                 </div>
-                
+
+                <div class="form-group" id="customMappingSelector" style="display: none;">
+                    <label for="ruleCustomMappingId">Select Mapping:</label>
+                    <select id="ruleCustomMappingId" name="customMappingId">
+                        <option value="">-- Select a mapping --</option>
+                    </select>
+                    <small>Create mappings in the Payload Mapper section below</small>
+                </div>
+
                 <div class="form-group">
                     <label>
                         <input type="checkbox" id="ruleEnabled" name="enabled" checked>
@@ -715,7 +951,7 @@
         function editRule(index) {
             editingRuleIndex = index;
             const rule = currentRules[index];
-            
+
             document.getElementById('modalTitle').textContent = 'Edit Import Rule';
             document.getElementById('ruleName').value = rule.name;
             document.getElementById('ruleMqttTopic').value = rule.mqttTopic;
@@ -726,7 +962,13 @@
             document.getElementById('ruleEnabled').checked = rule.enabled;
             document.getElementById('ruleIgnoreDuplicates').checked = rule.ignoreDuplicates !== false;
             document.getElementById('ruleExcludeMMSI').value = rule.excludeMMSI || '';
-            
+
+            // Handle custom mapping selection
+            toggleCustomMappingSelector();
+            if (rule.payloadFormat === 'custom-mapping' && rule.customMappingId) {
+                document.getElementById('ruleCustomMappingId').value = rule.customMappingId;
+            }
+
             document.getElementById('ruleModal').style.display = 'block';
         }
 
@@ -770,6 +1012,7 @@
             e.preventDefault();
 
             const formData = new FormData(e.target);
+            const payloadFormat = formData.get('payloadFormat');
             const rule = {
                 id: editingRuleIndex >= 0 ? currentRules[editingRuleIndex].id : Date.now().toString(),
                 name: formData.get('name'),
@@ -777,10 +1020,13 @@
                 signalKContext: formData.get('signalKContext'),
                 signalKPath: formData.get('signalKPath'),
                 sourceLabel: formData.get('sourceLabel'),
-                payloadFormat: formData.get('payloadFormat'),
+                payloadFormat: payloadFormat,
                 enabled: document.getElementById('ruleEnabled').checked,
                 ignoreDuplicates: document.getElementById('ruleIgnoreDuplicates').checked,
-                excludeMMSI: formData.get('excludeMMSI')
+                excludeMMSI: formData.get('excludeMMSI'),
+                customMappingId: payloadFormat === 'custom-mapping'
+                    ? document.getElementById('ruleCustomMappingId').value
+                    : undefined
             };
 
             const isEditing = editingRuleIndex >= 0;
@@ -877,7 +1123,7 @@
         }
 
         // Test payload format
-        function testPayloadFormat() {
+        async function testPayloadFormat() {
             const payloadInput = document.getElementById('testPayload').value.trim();
             const resultsDiv = document.getElementById('testResults');
 
@@ -909,6 +1155,21 @@
                         break;
                     case 'full':
                         results = testFullSignalK(payloadInput);
+                        break;
+                    case 'custom-mapping':
+                        // For custom-mapping, call the test-mapping API
+                        const mappingId = document.getElementById('ruleCustomMappingId').value;
+                        if (!mappingId) {
+                            results = { error: 'Please select a mapping' };
+                        } else {
+                            const mapping = currentMappings.find(m => m.id === mappingId);
+                            if (!mapping) {
+                                results = { error: 'Mapping not found' };
+                            } else {
+                                // Call API synchronously using await (we'll make this async below)
+                                results = await testCustomMappingFormat(payloadInput, mqttTopic, mapping, signalKContext);
+                            }
+                        }
                         break;
                     default:
                         results = { error: 'Unknown format' };
@@ -1041,6 +1302,38 @@
             return topic.replace(/\//g, '.');
         }
 
+        // Test custom mapping format by calling the API
+        async function testCustomMappingFormat(payload, topic, mapping, contextOverride) {
+            try {
+                const response = await fetch('/plugins/signalk-mqtt-import/api/test-mapping', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payload, topic, mapping })
+                });
+
+                const data = await response.json();
+
+                if (!data.success) {
+                    return { error: data.error || 'Failed to test mapping' };
+                }
+
+                // Convert API response to the format displayTestResults expects
+                const paths = data.results.map(r => ({
+                    path: r.signalKPath,
+                    value: r.transformedValue,
+                    originalValue: r.originalValue
+                }));
+
+                return {
+                    context: contextOverride || mapping.signalKContext || 'vessels.self',
+                    paths: paths,
+                    customMapping: true
+                };
+            } catch (error) {
+                return { error: error.message };
+            }
+        }
+
         // Display test results
         function displayTestResults(results) {
             const resultsDiv = document.getElementById('testResults');
@@ -1118,6 +1411,20 @@
                     case 'full':
                         results = testFullSignalK(payloadInput);
                         break;
+                    case 'custom-mapping':
+                        const mappingId = document.getElementById('ruleCustomMappingId').value;
+                        if (!mappingId) {
+                            throw new Error('Please select a mapping');
+                        }
+                        const mapping = currentMappings.find(m => m.id === mappingId);
+                        if (!mapping) {
+                            throw new Error('Mapping not found');
+                        }
+                        results = await testCustomMappingFormat(payloadInput, mqttTopic, mapping, signalKContext);
+                        if (results.error) {
+                            throw new Error(results.error);
+                        }
+                        break;
                     default:
                         throw new Error('Unknown format');
                 }
@@ -1169,6 +1476,607 @@
                 showNotification('Test Error', error.message, 'error', 5000);
             }
         }
+
+        // ============================================
+        // Payload Mapper Functions
+        // ============================================
+
+        let currentMappings = [];
+        let currentParsedFields = [];
+        let editingMappingId = null;
+
+        // Initialize mappings on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshMappings();
+        });
+
+        // Toggle custom mapping selector visibility
+        function toggleCustomMappingSelector() {
+            const format = document.getElementById('rulePayloadFormat').value;
+            const selector = document.getElementById('customMappingSelector');
+            selector.style.display = format === 'custom-mapping' ? 'block' : 'none';
+
+            if (format === 'custom-mapping') {
+                populateMappingSelector();
+            }
+        }
+
+        // Populate mapping dropdown in rule form
+        function populateMappingSelector() {
+            const select = document.getElementById('ruleCustomMappingId');
+            select.innerHTML = '<option value="">-- Select a mapping --</option>';
+
+            currentMappings.forEach(mapping => {
+                const option = document.createElement('option');
+                option.value = mapping.id;
+                option.textContent = mapping.name || mapping.id;
+                select.appendChild(option);
+            });
+        }
+
+        // Refresh mappings from server
+        async function refreshMappings() {
+            try {
+                const response = await fetch('/plugins/signalk-mqtt-import/api/mappings');
+                const data = await response.json();
+
+                if (data.success) {
+                    currentMappings = data.mappings || [];
+                    displaySavedMappings();
+                    populateMappingSelector();
+                    addLog(`Loaded ${currentMappings.length} payload mappings`);
+                }
+            } catch (error) {
+                addLog('Error loading mappings: ' + error.message);
+            }
+        }
+
+        // Display saved mappings list
+        function displaySavedMappings() {
+            const container = document.getElementById('savedMappingsList');
+
+            if (currentMappings.length === 0) {
+                container.innerHTML = '<p style="color: #666;">No mappings saved yet. Create one above.</p>';
+                return;
+            }
+
+            let html = '';
+            currentMappings.forEach(mapping => {
+                const fieldCount = mapping.fieldMappings ? mapping.fieldMappings.length : 0;
+                html += `
+                    <div class="mapping-item">
+                        <div class="mapping-item-info">
+                            <h4>${escapeHtml(mapping.name || mapping.id)}</h4>
+                            <p>Topic: ${escapeHtml(mapping.topicPattern)} | ${fieldCount} field(s)</p>
+                        </div>
+                        <div>
+                            <button class="btn btn-tiny" onclick="editMapping('${mapping.id}')">Edit</button>
+                            <button class="btn btn-tiny btn-danger" onclick="deleteMapping('${mapping.id}')">Delete</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // Parse payload for mapping
+        async function parsePayloadForMapping() {
+            const payload = document.getElementById('mapperPayload').value.trim();
+            const sampleTopic = document.getElementById('mapperSampleTopic').value.trim();
+
+            if (!payload) {
+                showNotification('Error', 'Please enter a JSON payload', 'error', 3000);
+                return;
+            }
+
+            try {
+                const response = await fetch('/plugins/signalk-mqtt-import/api/parse-payload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payload, topic: sampleTopic })
+                });
+
+                const data = await response.json();
+
+                if (data.success && data.fields) {
+                    currentParsedFields = data.fields;
+                    displayMappingEditor(data.fields);
+                    document.getElementById('mappingEditorContainer').style.display = 'block';
+                    addLog(`Parsed ${data.fields.length} fields from payload`);
+                } else {
+                    showNotification('Error', data.error || 'Failed to parse payload', 'error', 5000);
+                }
+            } catch (error) {
+                showNotification('Error', error.message, 'error', 5000);
+            }
+        }
+
+        // Display mapping editor with parsed fields
+        function displayMappingEditor(fields) {
+            const tbody = document.getElementById('mappingEditorBody');
+            let html = '';
+
+            fields.forEach((field, index) => {
+                const valueDisplay = typeof field.value === 'object'
+                    ? JSON.stringify(field.value)
+                    : String(field.value);
+
+                html += `
+                    <tr data-index="${index}">
+                        <td><input type="checkbox" class="field-enabled" checked></td>
+                        <td><code>${escapeHtml(field.key)}</code><br><small style="color:#666;">${field.type}</small></td>
+                        <td>
+                            <input type="text" class="field-path" value="${escapeHtml(field.suggestedPath || '')}" placeholder="e.g., sensors.{device}.${field.key}">
+                        </td>
+                        <td>
+                            <select class="field-transform" onchange="updateTransformConfig(${index}, this.value)">
+                                <option value="none">None</option>
+                                <option value="boolean-map">Boolean Map</option>
+                                <option value="math">Math Operation</option>
+                                <option value="unit">Unit Conversion</option>
+                            </select>
+                            <div id="transformConfig_${index}" class="transform-config"></div>
+                        </td>
+                        <td class="value-preview">
+                            <span class="value-original">${escapeHtml(valueDisplay.substring(0, 30))}</span>
+                            <span id="transformedValue_${index}" class="value-transformed"></span>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        // Update transform configuration UI
+        function updateTransformConfig(index, transformType) {
+            const configDiv = document.getElementById(`transformConfig_${index}`);
+            let html = '';
+
+            switch (transformType) {
+                case 'boolean-map':
+                    html = `
+                        <label>True value:</label>
+                        <input type="text" class="transform-true" placeholder="e.g., open" style="width:80px;">
+                        <label>False value:</label>
+                        <input type="text" class="transform-false" placeholder="e.g., closed" style="width:80px;">
+                    `;
+                    break;
+                case 'math':
+                    html = `
+                        <select class="transform-operation">
+                            <option value="multiply">Multiply (×)</option>
+                            <option value="divide">Divide (÷)</option>
+                            <option value="add">Add (+)</option>
+                            <option value="subtract">Subtract (−)</option>
+                        </select>
+                        <input type="number" class="transform-operand" placeholder="Value" style="width:70px;" step="any">
+                    `;
+                    break;
+                case 'unit':
+                    html = `
+                        <select class="transform-fromUnit">
+                            <option value="C">°C</option>
+                            <option value="F">°F</option>
+                            <option value="mV">mV</option>
+                            <option value="%">%</option>
+                            <option value="hPa">hPa</option>
+                        </select>
+                        <span>→</span>
+                        <select class="transform-toUnit">
+                            <option value="K">K (Kelvin)</option>
+                            <option value="V">V (Volts)</option>
+                            <option value="ratio">Ratio (0-1)</option>
+                            <option value="Pa">Pa</option>
+                        </select>
+                    `;
+                    break;
+                default:
+                    html = '';
+            }
+
+            configDiv.innerHTML = html;
+            configDiv.className = transformType !== 'none' ? 'transform-config active' : 'transform-config';
+        }
+
+        // Toggle all field checkboxes
+        function toggleAllFields(checked) {
+            document.querySelectorAll('.field-enabled').forEach(cb => {
+                cb.checked = checked;
+            });
+        }
+
+        // Build mapping from editor
+        function buildMappingFromEditor() {
+            const topicPattern = document.getElementById('mapperTopic').value.trim();
+            const context = document.getElementById('mapperContext').value.trim() || 'vessels.self';
+            const name = document.getElementById('mappingName').value.trim();
+
+            const fieldMappings = [];
+            const rows = document.querySelectorAll('#mappingEditorBody tr');
+
+            rows.forEach((row, index) => {
+                const enabled = row.querySelector('.field-enabled').checked;
+                const path = row.querySelector('.field-path').value.trim();
+                const transformType = row.querySelector('.field-transform').value;
+
+                if (!path) return;
+
+                const transform = { type: transformType, config: {} };
+                const configDiv = document.getElementById(`transformConfig_${index}`);
+
+                if (transformType === 'boolean-map') {
+                    transform.config.trueValue = configDiv.querySelector('.transform-true')?.value || true;
+                    transform.config.falseValue = configDiv.querySelector('.transform-false')?.value || false;
+                } else if (transformType === 'math') {
+                    transform.config.operation = configDiv.querySelector('.transform-operation')?.value || 'multiply';
+                    transform.config.operand = parseFloat(configDiv.querySelector('.transform-operand')?.value) || 1;
+                } else if (transformType === 'unit') {
+                    transform.config.fromUnit = configDiv.querySelector('.transform-fromUnit')?.value || '';
+                    transform.config.toUnit = configDiv.querySelector('.transform-toUnit')?.value || '';
+                }
+
+                fieldMappings.push({
+                    sourceKey: currentParsedFields[index].key,
+                    signalKPath: path,
+                    transform: transform,
+                    enabled: enabled
+                });
+            });
+
+            return {
+                id: editingMappingId || Date.now().toString(),
+                name: name || `Mapping ${new Date().toLocaleString()}`,
+                topicPattern: topicPattern,
+                signalKContext: context,
+                fieldMappings: fieldMappings,
+                enabled: true,
+                updatedAt: new Date().toISOString()
+            };
+        }
+
+        // Save mapping from editor
+        async function saveMappingFromEditor() {
+            const mapping = buildMappingFromEditor();
+
+            if (!mapping.topicPattern) {
+                showNotification('Error', 'Please enter an MQTT topic pattern', 'error', 3000);
+                return;
+            }
+
+            if (mapping.fieldMappings.length === 0) {
+                showNotification('Error', 'Please configure at least one field mapping', 'error', 3000);
+                return;
+            }
+
+            // Update or add mapping
+            const existingIndex = currentMappings.findIndex(m => m.id === mapping.id);
+            if (existingIndex >= 0) {
+                currentMappings[existingIndex] = mapping;
+            } else {
+                currentMappings.push(mapping);
+            }
+
+            try {
+                const response = await fetch('/plugins/signalk-mqtt-import/api/mappings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mappings: currentMappings })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showNotification('Success', 'Mapping saved successfully', 'success', 2000);
+                    addLog(`Mapping "${mapping.name}" saved`);
+                    displaySavedMappings();
+                    populateMappingSelector();
+                    editingMappingId = null;
+                } else {
+                    showNotification('Error', data.error || 'Failed to save mapping', 'error', 5000);
+                }
+            } catch (error) {
+                showNotification('Error', error.message, 'error', 5000);
+            }
+        }
+
+        // Edit existing mapping
+        function editMapping(mappingId) {
+            const mapping = currentMappings.find(m => m.id === mappingId);
+            if (!mapping) return;
+
+            editingMappingId = mappingId;
+
+            // Populate form
+            document.getElementById('mapperTopic').value = mapping.topicPattern || '';
+            document.getElementById('mapperContext').value = mapping.signalKContext || 'vessels.self';
+            document.getElementById('mappingName').value = mapping.name || '';
+
+            // Convert field mappings to parsed fields format
+            currentParsedFields = mapping.fieldMappings.map(fm => ({
+                key: fm.sourceKey,
+                value: '',
+                type: 'unknown',
+                suggestedPath: fm.signalKPath
+            }));
+
+            // Display in editor
+            displayMappingEditorFromMapping(mapping);
+            document.getElementById('mappingEditorContainer').style.display = 'block';
+
+            showNotification('Edit Mode', `Editing mapping "${mapping.name}"`, 'info', 2000);
+        }
+
+        // Display mapping editor from existing mapping
+        function displayMappingEditorFromMapping(mapping) {
+            const tbody = document.getElementById('mappingEditorBody');
+            let html = '';
+
+            mapping.fieldMappings.forEach((fm, index) => {
+                const transformType = fm.transform?.type || 'none';
+
+                html += `
+                    <tr data-index="${index}">
+                        <td><input type="checkbox" class="field-enabled" ${fm.enabled !== false ? 'checked' : ''}></td>
+                        <td><code>${escapeHtml(fm.sourceKey)}</code></td>
+                        <td>
+                            <input type="text" class="field-path" value="${escapeHtml(fm.signalKPath || '')}">
+                        </td>
+                        <td>
+                            <select class="field-transform" onchange="updateTransformConfig(${index}, this.value)">
+                                <option value="none" ${transformType === 'none' ? 'selected' : ''}>None</option>
+                                <option value="boolean-map" ${transformType === 'boolean-map' ? 'selected' : ''}>Boolean Map</option>
+                                <option value="math" ${transformType === 'math' ? 'selected' : ''}>Math Operation</option>
+                                <option value="unit" ${transformType === 'unit' ? 'selected' : ''}>Unit Conversion</option>
+                            </select>
+                            <div id="transformConfig_${index}" class="transform-config ${transformType !== 'none' ? 'active' : ''}"></div>
+                        </td>
+                        <td class="value-preview">
+                            <span class="value-original">--</span>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+
+            // Set transform configs
+            mapping.fieldMappings.forEach((fm, index) => {
+                if (fm.transform && fm.transform.type !== 'none') {
+                    updateTransformConfig(index, fm.transform.type);
+                    const configDiv = document.getElementById(`transformConfig_${index}`);
+
+                    if (fm.transform.type === 'boolean-map' && fm.transform.config) {
+                        const trueInput = configDiv.querySelector('.transform-true');
+                        const falseInput = configDiv.querySelector('.transform-false');
+                        if (trueInput) trueInput.value = fm.transform.config.trueValue || '';
+                        if (falseInput) falseInput.value = fm.transform.config.falseValue || '';
+                    } else if (fm.transform.type === 'math' && fm.transform.config) {
+                        const opSelect = configDiv.querySelector('.transform-operation');
+                        const operandInput = configDiv.querySelector('.transform-operand');
+                        if (opSelect) opSelect.value = fm.transform.config.operation || 'multiply';
+                        if (operandInput) operandInput.value = fm.transform.config.operand || '';
+                    } else if (fm.transform.type === 'unit' && fm.transform.config) {
+                        const fromSelect = configDiv.querySelector('.transform-fromUnit');
+                        const toSelect = configDiv.querySelector('.transform-toUnit');
+                        if (fromSelect) fromSelect.value = fm.transform.config.fromUnit || 'C';
+                        if (toSelect) toSelect.value = fm.transform.config.toUnit || 'K';
+                    }
+                }
+            });
+        }
+
+        // Delete mapping
+        async function deleteMapping(mappingId) {
+            const mapping = currentMappings.find(m => m.id === mappingId);
+            if (!confirm(`Delete mapping "${mapping?.name || mappingId}"?`)) return;
+
+            try {
+                const response = await fetch(`/plugins/signalk-mqtt-import/api/mappings/${mappingId}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    currentMappings = currentMappings.filter(m => m.id !== mappingId);
+                    displaySavedMappings();
+                    populateMappingSelector();
+                    showNotification('Success', 'Mapping deleted', 'success', 2000);
+                    addLog(`Mapping deleted`);
+                } else {
+                    showNotification('Error', data.error || 'Failed to delete mapping', 'error', 5000);
+                }
+            } catch (error) {
+                showNotification('Error', error.message, 'error', 5000);
+            }
+        }
+
+        // Test current mapping
+        async function testCurrentMapping() {
+            const payload = document.getElementById('mapperPayload').value.trim();
+            const sampleTopic = document.getElementById('mapperSampleTopic').value.trim();
+            const mapping = buildMappingFromEditor();
+
+            if (!payload) {
+                showNotification('Error', 'Please enter a payload to test', 'error', 3000);
+                return;
+            }
+
+            try {
+                const response = await fetch('/plugins/signalk-mqtt-import/api/test-mapping', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payload, topic: sampleTopic, mapping })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayMappingTestResults(data.results, data.delta);
+                    addLog(`Mapping test: ${data.results.length} values transformed`);
+                } else {
+                    showNotification('Error', data.error || 'Test failed', 'error', 5000);
+                }
+            } catch (error) {
+                showNotification('Error', error.message, 'error', 5000);
+            }
+        }
+
+        // Display mapping test results
+        function displayMappingTestResults(results, delta) {
+            const container = document.getElementById('mappingTestResults');
+
+            let html = '<div class="test-results success">';
+            html += '<strong>Test Results:</strong><br><br>';
+
+            results.forEach(r => {
+                html += `<div class="test-path">`;
+                html += `<span class="test-path-name">${escapeHtml(r.signalKPath)}</span>`;
+                html += `<span class="test-path-value">`;
+                html += `${escapeHtml(String(r.originalValue))} → <strong>${escapeHtml(String(r.transformedValue))}</strong>`;
+                html += `</span></div>`;
+            });
+
+            html += '<br><strong>SignalK Delta:</strong><br>';
+            html += `<pre style="font-size:11px; overflow-x:auto;">${escapeHtml(JSON.stringify(delta, null, 2))}</pre>`;
+            html += '</div>';
+
+            container.innerHTML = html;
+        }
+
+        // Test and send mapping to SignalK
+        async function testAndSendMappingToSignalK() {
+            const payload = document.getElementById('mapperPayload').value.trim();
+            const sampleTopic = document.getElementById('mapperSampleTopic').value.trim();
+            const mapping = buildMappingFromEditor();
+
+            if (!payload) {
+                showNotification('Error', 'Please enter a payload to test', 'error', 3000);
+                return;
+            }
+
+            try {
+                // First test the mapping
+                const testResponse = await fetch('/plugins/signalk-mqtt-import/api/test-mapping', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ payload, topic: sampleTopic, mapping })
+                });
+
+                const testData = await testResponse.json();
+
+                if (!testData.success) {
+                    showNotification('Error', testData.error || 'Test failed', 'error', 5000);
+                    return;
+                }
+
+                displayMappingTestResults(testData.results, testData.delta);
+
+                // Send delta to SignalK
+                const sendResponse = await fetch('/plugins/signalk-mqtt-import/api/test-send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ delta: testData.delta })
+                });
+
+                const sendData = await sendResponse.json();
+
+                if (sendData.success) {
+                    showNotification('Success', `Sent ${testData.results.length} path(s) to SignalK`, 'success', 3000);
+                    addLog(`Test mapping sent to SignalK: ${testData.results.length} paths`);
+
+                    const container = document.getElementById('mappingTestResults');
+                    container.innerHTML += '<div style="margin-top: 10px; padding: 8px; background: #d4edda; border: 1px solid #28a745; border-radius: 4px; color: #155724;">✓ Successfully sent to SignalK server</div>';
+                } else {
+                    showNotification('Error', sendData.error || 'Failed to send to SignalK', 'error', 5000);
+                }
+            } catch (error) {
+                showNotification('Error', error.message, 'error', 5000);
+            }
+        }
+
+        // Clear mapping editor
+        function clearMappingEditor() {
+            document.getElementById('mapperPayload').value = '';
+            document.getElementById('mapperTopic').value = '';
+            document.getElementById('mapperSampleTopic').value = '';
+            document.getElementById('mappingName').value = '';
+            document.getElementById('mappingEditorBody').innerHTML = '';
+            document.getElementById('mappingEditorContainer').style.display = 'none';
+            document.getElementById('mappingTestResults').innerHTML = '';
+            currentParsedFields = [];
+            editingMappingId = null;
+        }
+
+        // Export to YAML
+        function exportYaml() {
+            window.location.href = '/plugins/signalk-mqtt-import/api/export-yaml';
+            addLog('Exported configuration to YAML');
+        }
+
+        // Import from YAML
+        async function importYaml(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const yamlContent = e.target.result;
+
+                if (!confirm('Import will replace all existing rules and mappings. Continue?')) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/plugins/signalk-mqtt-import/api/import-yaml', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ yamlContent })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        showNotification('Success', `Imported ${data.rulesImported} rules and ${data.mappingsImported} mappings`, 'success', 3000);
+                        addLog(`YAML import: ${data.rulesImported} rules, ${data.mappingsImported} mappings`);
+
+                        if (data.warnings && data.warnings.length > 0) {
+                            data.warnings.forEach(w => addLog(`Warning: ${w}`));
+                        }
+
+                        // Refresh everything
+                        refreshRules();
+                        refreshMappings();
+                        refreshStatus();
+                    } else {
+                        showNotification('Error', data.error || 'Import failed', 'error', 5000);
+                    }
+                } catch (error) {
+                    showNotification('Error', error.message, 'error', 5000);
+                }
+            };
+
+            reader.readAsText(file);
+            event.target.value = ''; // Reset file input
+        }
+
+        // Helper: Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Update rule form submission to include customMappingId
+        const originalRuleFormHandler = document.getElementById('ruleForm').onsubmit;
+        document.getElementById('ruleForm').addEventListener('submit', function(e) {
+            // The existing handler will run, but we need to ensure customMappingId is included
+        });
+
+        // Patch the rule save to include customMappingId
+        const originalSaveRulesToServer = saveRulesToServer;
     </script>
 </body>
 </html>

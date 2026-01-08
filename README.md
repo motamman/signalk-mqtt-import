@@ -1,6 +1,6 @@
 # SignalK MQTT Import Manager
 
-**Version 0.5.0-beta.1**
+**Version 0.5.1-beta.2**
 
 A comprehensive SignalK plugin and webapp provides a web-based interface for managing selective import of SignalK data from MQTT brokers. This plugin serves as the inverse of the MQTT Export plugin, allowing you to import data from MQTT topics back into SignalK.
 
@@ -87,7 +87,9 @@ Navigate to **SignalK Admin → Server → Plugin Config → SignalK MQTT Import
 ## Web Interface
 
 Access the management interface at:
-- **http://your-signalk-server:3000/signalk-mqtt-import/**
+- **http://your-signalk-server/signalk-mqtt-import/**
+
+(Port depends on your SignalK server configuration)
 
 ### Interface Features
 
@@ -110,7 +112,7 @@ Access the management interface at:
 - **SignalK Context**: Target SignalK context (optional - can be extracted from topic)
 - **SignalK Path**: Target SignalK path (optional - can be extracted from topic)
 - **Source Label**: Label to use for the data source in SignalK
-- **Payload Format**: Expected format of MQTT messages (full SignalK or value-only)
+- **Payload Format**: Expected format of MQTT messages (full, value-only, or json-object)
 - **Ignore Duplicates**: Skip duplicate messages to reduce SignalK updates
 - **Exclude MMSI**: Comma-separated list of MMSI numbers to exclude from this rule
 
@@ -147,11 +149,11 @@ The plugin automatically detects when MQTT topics reference the self vessel:
 
 The plugin comes with practical rules for common marine data import (configured via web interface):
 
-1. **All Vessel Data** - `vessels/urn_mrn_imo_mmsi_+/#` (auto-detects self vessel)
-2. **Navigation Data** - `vessels/urn_mrn_imo_mmsi_+/navigation/#` (auto-detects self vessel)
-3. **Environment Data** - `vessels/urn_mrn_imo_mmsi_+/environment/#` (auto-detects self vessel)
-4. **Electrical Data** - `vessels/urn_mrn_imo_mmsi_+/electrical/#` (disabled by default)
-5. **Propulsion Data** - `vessels/urn_mrn_imo_mmsi_+/propulsion/#` (disabled by default)
+1. **All Vessel Data (Auto-detect Self)** - `vessels/+/#` (disabled by default)
+2. **Navigation Data (All Vessels)** - `vessels/+/navigation/#` (enabled by default)
+3. **Environment Data (All Vessels)** - `vessels/+/environment/#` (disabled by default)
+4. **Electrical Data (All Vessels)** - `vessels/+/electrical/#` (disabled by default)
+5. **Propulsion Data (All Vessels)** - `vessels/+/propulsion/#` (disabled by default)
 
 **Note**: These rules are created automatically on first startup and can be modified through the web interface.
 
@@ -272,6 +274,28 @@ or
 }
 ```
 
+### JSON Object Format
+Each key in the JSON object becomes a separate SignalK path, appended to the base path extracted from the topic:
+
+Topic: `vessels/self/environment/outside`
+```json
+{
+  "temperature": 25.5,
+  "humidity": 65
+}
+```
+Results in two SignalK values:
+- `environment.outside.temperature` = 25.5
+- `environment.outside.humidity` = 65
+
+### Value-Only Format
+The entire payload is treated as a single value for the path extracted from the topic:
+
+Topic: `vessels/self/environment/outside/temperature`
+```
+25.5
+```
+Results in: `environment.outside.temperature` = 25.5
 
 ## Troubleshooting
 
@@ -307,7 +331,7 @@ Enable debug logging in SignalK admin to see detailed import processing:
 
 ## License
 
-MIT License - See [LICENSE](../LICENSE) file for details.
+MIT License - See [LICENSE](LICENSE) file for details.
 
 ## Contributing
 

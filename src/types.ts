@@ -44,9 +44,10 @@ export interface ImportRule {
   signalKPath: string;
   sourceLabel: string;
   enabled: boolean;
-  payloadFormat: 'full' | 'value-only' | 'json-object';
+  payloadFormat: 'full' | 'value-only' | 'json-object' | 'custom-mapping';
   ignoreDuplicates: boolean;
   excludeMMSI?: string;
+  customMappingId?: string; // Reference to PayloadMapping when payloadFormat is 'custom-mapping'
   transformValue?: (value: any) => any;
 }
 
@@ -110,9 +111,11 @@ export interface TypedResponse<T = any> extends Response {
 export interface PluginState {
   mqttClient: MqttClient | null;
   importRules: ImportRule[];
+  payloadMappings: PayloadMapping[];
   lastReceivedMessages: Map<string, number>;
   selfVesselUrn: string | null;
   rulesFilePath: string | null;
+  mappingsFilePath: string | null;
   currentConfig?: MQTTImportConfig;
 }
 
@@ -149,7 +152,7 @@ export interface RuleMatchResult {
 }
 
 // Utility Types
-export type PayloadFormat = 'full' | 'value-only' | 'json-object';
+export type PayloadFormat = 'full' | 'value-only' | 'json-object' | 'custom-mapping';
 export type MessageKey = string; // Format: "topic:message"
 
 // Error Types
@@ -232,4 +235,112 @@ export interface PersistentStorage {
   filePath: string;
   lastModified: number;
   rules: ImportRule[];
+}
+
+// ============================================
+// Custom Payload Mapping Types
+// ============================================
+
+// Value transformation configuration
+export interface ValueTransform {
+  type: 'none' | 'boolean-map' | 'math' | 'unit' | 'expression';
+  config: {
+    // For boolean-map
+    trueValue?: any;
+    falseValue?: any;
+    // For math operations
+    operation?: 'multiply' | 'divide' | 'add' | 'subtract';
+    operand?: number;
+    // For unit conversions
+    fromUnit?: string;
+    toUnit?: string;
+    // For custom expressions (advanced)
+    expression?: string;
+  };
+}
+
+// Individual field mapping within a payload
+export interface FieldMapping {
+  sourceKey: string; // JSON key from payload, e.g., "contact"
+  signalKPath: string; // Full path with optional placeholders, e.g., "notifications.security.{device}.status"
+  transform: ValueTransform;
+  enabled: boolean;
+}
+
+// Complete payload mapping configuration
+export interface PayloadMapping {
+  id: string;
+  name: string;
+  description?: string;
+  topicPattern: string; // MQTT topic pattern, e.g., "zigbee2mqtt/+"
+  signalKContext: string; // e.g., "vessels.self"
+  fieldMappings: FieldMapping[];
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// Placeholder extraction result
+export interface PlaceholderValues {
+  [key: string]: string; // e.g., { device: "StateRoomPortHole", location: "stateroom" }
+}
+
+// Mapping storage types
+export interface MappingsStorage {
+  mappings: PayloadMapping[];
+  version: string;
+  lastModified: string;
+}
+
+// API types for mappings
+export interface MappingsApiResponse extends ApiResponse {
+  mappings?: PayloadMapping[];
+}
+
+export interface ParsePayloadRequest {
+  payload: string; // JSON string
+  topic: string;
+}
+
+export interface ParsePayloadResponse extends ApiResponse {
+  fields?: Array<{
+    key: string;
+    value: any;
+    type: string;
+    suggestedPath?: string;
+  }>;
+}
+
+export interface TestMappingRequest {
+  payload: string;
+  topic: string;
+  mapping: PayloadMapping;
+}
+
+export interface TestMappingResponse extends ApiResponse {
+  results?: Array<{
+    sourceKey: string;
+    originalValue: any;
+    transformedValue: any;
+    signalKPath: string;
+  }>;
+  delta?: SignalKDelta;
+}
+
+// YAML export/import types
+export interface YamlExportData {
+  version: string;
+  exportedAt: string;
+  rules: ImportRule[];
+  mappings: PayloadMapping[];
+}
+
+export interface YamlImportRequest {
+  yamlContent: string;
+}
+
+export interface YamlImportResponse extends ApiResponse {
+  rulesImported?: number;
+  mappingsImported?: number;
+  warnings?: string[];
 }

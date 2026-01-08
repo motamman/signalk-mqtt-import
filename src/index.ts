@@ -2,6 +2,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { Router } from 'express';
 import { connect } from 'mqtt';
+import * as yaml from 'js-yaml';
 import {
   SignalKApp,
   SignalKPlugin,
@@ -17,6 +18,18 @@ import {
   ApiResponse,
   RuleUpdateRequest,
   MQTTClientOptions,
+  PayloadMapping,
+  FieldMapping,
+  ValueTransform,
+  PlaceholderValues,
+  MappingsApiResponse,
+  ParsePayloadRequest,
+  ParsePayloadResponse,
+  TestMappingRequest,
+  TestMappingResponse,
+  YamlExportData,
+  YamlImportRequest,
+  YamlImportResponse,
 } from './types';
 
 // Global plugin state
@@ -37,9 +50,11 @@ export = function (app: SignalKApp): SignalKPlugin {
   const state: PluginState = {
     mqttClient: null,
     importRules: [],
+    payloadMappings: [],
     lastReceivedMessages: new Map<string, number>(),
     selfVesselUrn: null,
     rulesFilePath: null,
+    mappingsFilePath: null,
     currentConfig: undefined,
   };
 
@@ -64,6 +79,12 @@ export = function (app: SignalKApp): SignalKPlugin {
 
     app.debug(
       `Loaded ${state.importRules.length} import rules from persistent storage`
+    );
+
+    // Load payload mappings from persistent storage
+    state.payloadMappings = loadMappingsFromStorage();
+    app.debug(
+      `Loaded ${state.payloadMappings.length} payload mappings from persistent storage`
     );
 
     // Get self vessel URN for proper context mapping
@@ -281,6 +302,8 @@ export = function (app: SignalKApp): SignalKPlugin {
         signalKData = parseValueOnlyMessage(messageStr, rule, topic);
       } else if (rule.payloadFormat === 'json-object') {
         signalKData = parseJsonObjectMessage(messageStr, rule, topic);
+      } else if (rule.payloadFormat === 'custom-mapping') {
+        signalKData = parseCustomMappingMessage(messageStr, rule, topic);
       } else {
         signalKData = parseFullSignalKMessage(messageStr, rule, topic);
       }
@@ -883,6 +906,318 @@ export = function (app: SignalKApp): SignalKPlugin {
       }
     );
 
+    // ============================================
+    // Payload Mapping API Endpoints
+    // ============================================
+
+    // Get all payload mappings
+    router.get(
+      '/api/mappings',
+      (_: TypedRequest, res: TypedResponse<MappingsApiResponse>) => {
+        res.json({
+          success: true,
+          mappings: state.payloadMappings,
+        });
+      }
+    );
+
+    // Update/save payload mappings
+    router.post(
+      '/api/mappings',
+      (
+        req: TypedRequest<{ mappings: PayloadMapping[] }>,
+        res: TypedResponse<ApiResponse>
+      ) => {
+        try {
+          const newMappings = req.body.mappings;
+          if (!Array.isArray(newMappings)) {
+            return res
+              .status(400)
+              .json({ success: false, error: 'Mappings must be an array' });
+          }
+
+          state.payloadMappings = newMappings;
+
+          if (saveMappingsToStorage(newMappings)) {
+            res.json({
+              success: true,
+              message: 'Payload mappings saved successfully',
+            });
+          } else {
+            res.status(500).json({
+              success: false,
+              error: 'Failed to save mappings to storage',
+            });
+          }
+        } catch (error) {
+          res
+            .status(500)
+            .json({ success: false, error: (error as Error).message });
+        }
+      }
+    );
+
+    // Delete a specific mapping
+    router.delete(
+      '/api/mappings/:id',
+      (req: TypedRequest, res: TypedResponse<ApiResponse>) => {
+        try {
+          const mappingId = req.params.id;
+          const index = state.payloadMappings.findIndex(
+            (m) => m.id === mappingId
+          );
+
+          if (index === -1) {
+            return res
+              .status(404)
+              .json({ success: false, error: 'Mapping not found' });
+          }
+
+          state.payloadMappings.splice(index, 1);
+
+          if (saveMappingsToStorage(state.payloadMappings)) {
+            res.json({
+              success: true,
+              message: 'Mapping deleted successfully',
+            });
+          } else {
+            res.status(500).json({
+              success: false,
+              error: 'Failed to save mappings after deletion',
+            });
+          }
+        } catch (error) {
+          res
+            .status(500)
+            .json({ success: false, error: (error as Error).message });
+        }
+      }
+    );
+
+    // Parse a payload and return field suggestions
+    router.post(
+      '/api/parse-payload',
+      (
+        req: TypedRequest<ParsePayloadRequest>,
+        res: TypedResponse<ParsePayloadResponse>
+      ) => {
+        try {
+          const { payload, topic } = req.body;
+
+          if (!payload) {
+            return res
+              .status(400)
+              .json({ success: false, error: 'Payload is required' });
+          }
+
+          const jsonObject = JSON.parse(payload);
+
+          if (
+            typeof jsonObject !== 'object' ||
+            jsonObject === null ||
+            Array.isArray(jsonObject)
+          ) {
+            return res.status(400).json({
+              success: false,
+              error: 'Payload must be a valid JSON object',
+            });
+          }
+
+          // Extract base path from topic using existing logic
+          const basePath = topic ? extractPathFromTopic(topic) : '';
+
+          // Extract fields - path is basePath + key
+          const fields = Object.entries(jsonObject).map(([key, value]) => {
+            const type = Array.isArray(value)
+              ? 'array'
+              : value === null
+                ? 'null'
+                : typeof value;
+
+            // Path comes from topic + key
+            const suggestedPath = basePath ? `${basePath}.${key}` : key;
+
+            return {
+              key,
+              value,
+              type,
+              suggestedPath,
+            };
+          });
+
+          res.json({
+            success: true,
+            fields,
+          });
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: `Invalid JSON: ${(error as Error).message}`,
+          });
+        }
+      }
+    );
+
+    // Test a mapping against a sample payload
+    router.post(
+      '/api/test-mapping',
+      (
+        req: TypedRequest<TestMappingRequest>,
+        res: TypedResponse<TestMappingResponse>
+      ) => {
+        try {
+          const { payload, topic, mapping } = req.body;
+
+          if (!payload || !mapping) {
+            return res.status(400).json({
+              success: false,
+              error: 'Payload and mapping are required',
+            });
+          }
+
+          const jsonObject = JSON.parse(payload);
+
+          // Extract placeholders from topic
+          const placeholders = extractPlaceholdersFromTopic(
+            mapping.topicPattern,
+            topic || mapping.topicPattern.replace(/[+#]/g, 'test')
+          );
+
+          // Process each field mapping
+          const results: Array<{
+            sourceKey: string;
+            originalValue: any;
+            transformedValue: any;
+            signalKPath: string;
+          }> = [];
+
+          const values: Array<{ path: any; value: any }> = [];
+
+          for (const fieldMapping of mapping.fieldMappings) {
+            if (!fieldMapping.enabled) continue;
+
+            const sourceValue = jsonObject[fieldMapping.sourceKey];
+            if (sourceValue === undefined) continue;
+
+            const transformedValue = applyTransform(
+              sourceValue,
+              fieldMapping.transform
+            );
+
+            const finalPath = applyPlaceholders(
+              fieldMapping.signalKPath,
+              placeholders
+            );
+
+            results.push({
+              sourceKey: fieldMapping.sourceKey,
+              originalValue: sourceValue,
+              transformedValue,
+              signalKPath: finalPath,
+            });
+
+            values.push({
+              path: finalPath as any,
+              value: transformedValue,
+            });
+          }
+
+          const delta: SignalKDelta = {
+            context: (mapping.signalKContext || 'vessels.self') as any,
+            updates: [
+              {
+                $source: 'mqtt-import-test',
+                timestamp: new Date().toISOString() as any,
+                values,
+              } as any,
+            ],
+          };
+
+          res.json({
+            success: true,
+            results,
+            delta,
+          });
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: (error as Error).message,
+          });
+        }
+      }
+    );
+
+    // Export rules and mappings as YAML
+    router.get(
+      '/api/export-yaml',
+      (_: TypedRequest, res: TypedResponse) => {
+        try {
+          const yamlContent = exportToYaml();
+          res.setHeader('Content-Type', 'text/yaml');
+          res.setHeader(
+            'Content-Disposition',
+            'attachment; filename="mqtt-import-config.yaml"'
+          );
+          res.send(yamlContent);
+        } catch (error) {
+          res
+            .status(500)
+            .json({ success: false, error: (error as Error).message });
+        }
+      }
+    );
+
+    // Import rules and mappings from YAML
+    router.post(
+      '/api/import-yaml',
+      (
+        req: TypedRequest<YamlImportRequest>,
+        res: TypedResponse<YamlImportResponse>
+      ) => {
+        try {
+          const { yamlContent } = req.body;
+
+          if (!yamlContent) {
+            return res
+              .status(400)
+              .json({ success: false, error: 'YAML content is required' });
+          }
+
+          const { rules, mappings, warnings } = importFromYaml(yamlContent);
+
+          // Save imported data
+          state.importRules = rules;
+          state.payloadMappings = mappings;
+
+          const rulesSaved = saveRulesToStorage(rules);
+          const mappingsSaved = saveMappingsToStorage(mappings);
+
+          if (rulesSaved && mappingsSaved) {
+            // Update MQTT subscriptions
+            updateMQTTSubscriptions();
+
+            res.json({
+              success: true,
+              rulesImported: rules.length,
+              mappingsImported: mappings.length,
+              warnings,
+              message: `Imported ${rules.length} rules and ${mappings.length} mappings`,
+            });
+          } else {
+            res.status(500).json({
+              success: false,
+              error: 'Failed to save imported configuration',
+            });
+          }
+        } catch (error) {
+          res.status(400).json({
+            success: false,
+            error: (error as Error).message,
+          });
+        }
+      }
+    );
+
     // Serve static files
     const publicPath = path.join(__dirname, '../public');
     if (fs.existsSync(publicPath)) {
@@ -985,5 +1320,362 @@ export = function (app: SignalKApp): SignalKPlugin {
     return null;
   }
 
-  return plugin;
+  // ============================================
+  // Payload Mappings Storage Functions
+  // ============================================
+
+  function getMappingsFilePath(): string {
+    if (!state.mappingsFilePath) {
+      const dataDir = app.getDataDirPath();
+      state.mappingsFilePath = path.join(dataDir, 'mqtt-import-mappings.json');
+    }
+    return state.mappingsFilePath;
+  }
+
+  function loadMappingsFromStorage(): PayloadMapping[] {
+    try {
+      const filePath = getMappingsFilePath();
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf8');
+        return JSON.parse(data) as PayloadMapping[];
+      }
+    } catch (error) {
+      app.debug(
+        `Error loading mappings from storage: ${(error as Error).message}`
+      );
+    }
+    return [];
+  }
+
+  function saveMappingsToStorage(mappings: PayloadMapping[]): boolean {
+    try {
+      const filePath = getMappingsFilePath();
+      fs.writeFileSync(filePath, JSON.stringify(mappings, null, 2));
+      app.debug(`Mappings saved to: ${filePath}`);
+      return true;
+    } catch (error) {
+      app.debug(
+        `Error saving mappings to storage: ${(error as Error).message}`
+      );
+      return false;
+    }
+  }
+
+  function getMappingById(mappingId: string): PayloadMapping | undefined {
+    return state.payloadMappings.find((m) => m.id === mappingId);
+  }
+
+  // ============================================
+  // Placeholder Extraction Functions
+  // ============================================
+
+  // Default placeholder names for wildcards in order
+  const PLACEHOLDER_NAMES = ['device', 'location', 'sensor', 'type', 'id'];
+
+  function extractPlaceholdersFromTopic(
+    topicPattern: string,
+    actualTopic: string
+  ): PlaceholderValues {
+    const placeholders: PlaceholderValues = {};
+
+    // Split pattern and actual topic into segments
+    const patternParts = topicPattern.split('/');
+    const topicParts = actualTopic.split('/');
+
+    let placeholderIndex = 0;
+
+    for (let i = 0; i < patternParts.length && i < topicParts.length; i++) {
+      if (patternParts[i] === '+') {
+        // Single-level wildcard - capture this segment
+        const placeholderName =
+          PLACEHOLDER_NAMES[placeholderIndex] || `placeholder${placeholderIndex}`;
+        placeholders[placeholderName] = topicParts[i];
+        placeholderIndex++;
+      } else if (patternParts[i] === '#') {
+        // Multi-level wildcard - capture remaining segments joined
+        const remaining = topicParts.slice(i).join('/');
+        const placeholderName =
+          PLACEHOLDER_NAMES[placeholderIndex] || `placeholder${placeholderIndex}`;
+        placeholders[placeholderName] = remaining;
+        break;
+      }
+    }
+
+    return placeholders;
+  }
+
+  function applyPlaceholders(
+    pathTemplate: string,
+    placeholders: PlaceholderValues
+  ): string {
+    let result = pathTemplate;
+    for (const [key, value] of Object.entries(placeholders)) {
+      result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+    }
+    return result;
+  }
+
+  // ============================================
+  // Value Transform Functions
+  // ============================================
+
+  function applyTransform(value: any, transform: ValueTransform): any {
+    if (!transform || transform.type === 'none') {
+      return value;
+    }
+
+    const config = transform.config || {};
+
+    switch (transform.type) {
+      case 'boolean-map':
+        if (typeof value === 'boolean') {
+          return value ? config.trueValue : config.falseValue;
+        }
+        // Handle truthy/falsy values
+        return value ? config.trueValue : config.falseValue;
+
+      case 'math':
+        const numValue = Number(value);
+        if (isNaN(numValue)) {
+          app.debug(`Cannot apply math transform to non-numeric value: ${value}`);
+          return value;
+        }
+        const operand = config.operand || 0;
+        switch (config.operation) {
+          case 'multiply':
+            return numValue * operand;
+          case 'divide':
+            return operand !== 0 ? numValue / operand : numValue;
+          case 'add':
+            return numValue + operand;
+          case 'subtract':
+            return numValue - operand;
+          default:
+            return numValue;
+        }
+
+      case 'unit':
+        // Unit conversions
+        const fromUnit = config.fromUnit || '';
+        const toUnit = config.toUnit || '';
+        const num = Number(value);
+        if (isNaN(num)) return value;
+
+        // Common conversions
+        if (fromUnit === 'C' && toUnit === 'K') {
+          return num + 273.15; // Celsius to Kelvin
+        }
+        if (fromUnit === 'mV' && toUnit === 'V') {
+          return num / 1000; // millivolts to volts
+        }
+        if (fromUnit === '%' && toUnit === 'ratio') {
+          return num / 100; // percentage to ratio
+        }
+        if (fromUnit === 'F' && toUnit === 'K') {
+          return (num - 32) * (5 / 9) + 273.15; // Fahrenheit to Kelvin
+        }
+        if (fromUnit === 'hPa' && toUnit === 'Pa') {
+          return num * 100; // hectopascals to pascals
+        }
+        return num;
+
+      case 'expression':
+        // Custom JavaScript expression (advanced)
+        if (config.expression) {
+          try {
+            // Create a safe evaluation context
+            const evalFunc = new Function('value', `return ${config.expression}`);
+            return evalFunc(value);
+          } catch (error) {
+            app.debug(
+              `Error evaluating expression: ${(error as Error).message}`
+            );
+            return value;
+          }
+        }
+        return value;
+
+      default:
+        return value;
+    }
+  }
+
+  // ============================================
+  // Custom Mapping Message Handler
+  // ============================================
+
+  function parseCustomMappingMessage(
+    messageStr: string,
+    rule: ImportRule,
+    topic: string
+  ): SignalKDelta | null {
+    if (!rule.customMappingId) {
+      app.debug('Custom mapping rule missing customMappingId');
+      return null;
+    }
+
+    const mapping = getMappingById(rule.customMappingId);
+    if (!mapping) {
+      app.debug(`Mapping not found: ${rule.customMappingId}`);
+      return null;
+    }
+
+    try {
+      const jsonObject = JSON.parse(messageStr);
+
+      if (
+        typeof jsonObject !== 'object' ||
+        jsonObject === null ||
+        Array.isArray(jsonObject)
+      ) {
+        app.debug('Custom mapping format requires a valid JSON object');
+        return null;
+      }
+
+      // Extract placeholders from topic
+      const placeholders = extractPlaceholdersFromTopic(
+        mapping.topicPattern,
+        topic
+      );
+
+      // Process each field mapping
+      const values: Array<{ path: any; value: any }> = [];
+
+      for (const fieldMapping of mapping.fieldMappings) {
+        if (!fieldMapping.enabled) continue;
+
+        const sourceValue = jsonObject[fieldMapping.sourceKey];
+        if (sourceValue === undefined) continue;
+
+        // Apply value transform
+        const transformedValue = applyTransform(
+          sourceValue,
+          fieldMapping.transform
+        );
+
+        // Apply placeholders to path
+        const finalPath = applyPlaceholders(
+          fieldMapping.signalKPath,
+          placeholders
+        );
+
+        values.push({
+          path: finalPath as any,
+          value: transformedValue,
+        });
+      }
+
+      if (values.length === 0) {
+        app.debug('No values extracted from custom mapping');
+        return null;
+      }
+
+      const context = mapping.signalKContext || rule.signalKContext || 'vessels.self';
+      const sourceLabel = rule.sourceLabel || 'mqtt-import-custom';
+
+      return {
+        context: context as any,
+        updates: [
+          {
+            $source: sourceLabel,
+            timestamp: new Date().toISOString() as any,
+            values: values,
+          } as any,
+        ],
+      };
+    } catch (error) {
+      app.debug(
+        `Error parsing custom mapping message: ${(error as Error).message}`
+      );
+      return null;
+    }
+  }
+
+  // ============================================
+  // YAML Export/Import Functions
+  // ============================================
+
+  function exportToYaml(): string {
+    const exportData: YamlExportData = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      rules: state.importRules,
+      mappings: state.payloadMappings,
+    };
+    return yaml.dump(exportData, { indent: 2, lineWidth: 120 });
+  }
+
+  function importFromYaml(
+    yamlContent: string
+  ): { rules: ImportRule[]; mappings: PayloadMapping[]; warnings: string[] } {
+    const warnings: string[] = [];
+
+    try {
+      const data = yaml.load(yamlContent) as YamlExportData;
+
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid YAML structure');
+      }
+
+      const rules: ImportRule[] = [];
+      const mappings: PayloadMapping[] = [];
+
+      // Validate and import rules
+      if (Array.isArray(data.rules)) {
+        for (const rule of data.rules) {
+          if (rule.id && rule.mqttTopic) {
+            rules.push({
+              id: rule.id,
+              name: rule.name || '',
+              mqttTopic: rule.mqttTopic,
+              signalKContext: rule.signalKContext || '',
+              signalKPath: rule.signalKPath || '',
+              sourceLabel: rule.sourceLabel || '',
+              enabled: rule.enabled !== false,
+              payloadFormat: rule.payloadFormat || 'full',
+              ignoreDuplicates: rule.ignoreDuplicates || false,
+              excludeMMSI: rule.excludeMMSI,
+              customMappingId: rule.customMappingId,
+            });
+          } else {
+            warnings.push(`Skipped invalid rule: missing id or mqttTopic`);
+          }
+        }
+      }
+
+      // Validate and import mappings
+      if (Array.isArray(data.mappings)) {
+        for (const mapping of data.mappings) {
+          if (mapping.id && mapping.topicPattern) {
+            mappings.push({
+              id: mapping.id,
+              name: mapping.name || '',
+              description: mapping.description,
+              topicPattern: mapping.topicPattern,
+              signalKContext: mapping.signalKContext || 'vessels.self',
+              fieldMappings: Array.isArray(mapping.fieldMappings)
+                ? mapping.fieldMappings.map((fm: any) => ({
+                    sourceKey: fm.sourceKey || '',
+                    signalKPath: fm.signalKPath || '',
+                    transform: fm.transform || { type: 'none', config: {} },
+                    enabled: fm.enabled !== false,
+                  }))
+                : [],
+              enabled: mapping.enabled !== false,
+              createdAt: mapping.createdAt,
+              updatedAt: new Date().toISOString(),
+            });
+          } else {
+            warnings.push(`Skipped invalid mapping: missing id or topicPattern`);
+          }
+        }
+      }
+
+      return { rules, mappings, warnings };
+    } catch (error) {
+      throw new Error(`YAML parse error: ${(error as Error).message}`);
+    }
+  }
+
+  return plugin
 };
