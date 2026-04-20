@@ -1,25 +1,27 @@
 # SignalK MQTT Import Manager
 
-**Version 0.5.1-beta.2**
+**Version 0.6.0-beta.1**
 
-A comprehensive SignalK plugin and webapp provides a web-based interface for managing selective import of SignalK data from MQTT brokers. This plugin serves as the inverse of the MQTT Export plugin, allowing you to import data from MQTT topics back into SignalK.
+A SignalK plugin and webapp providing a web-based interface for managing selective import of SignalK data from MQTT brokers. This plugin serves as the inverse of the MQTT Export plugin, allowing you to import data from MQTT topics back into SignalK.
 
 ***THIS REQUIRES A SEPARATELY INSTALLED MQTT BROKER***
 
-Both have been tested with a local and remote Mosquitto broker. I run a local broker which bridges to the remote broker when I have connectivity on the boat. (I also have several DIY sensors that send to a broker regardless of whether the Signal K is running and use this plugin to import the sensor payloads.) This assumes that the payload has a fully formed delta complete with a path, $source, timestamp and value.
+Both have been tested with a local and remote Mosquitto broker. I run a local broker which bridges to the remote broker when I have connectivity on the boat. (I also have several DIY sensors that send to a broker regardless of whether the Signal K is running and use this plugin to import the sensor payloads.) The plugin accepts fully-formed SignalK deltas, single values, keyed JSON objects, or fully custom-mapped payloads (Zigbee2MQTT-style).
 
-This was adapted from a Node-RED flow that was running on my RPI for the last 18 months. I switched to this because Node-RED was starting to eat up reseources as my flows became more numerous and complex.
+This was adapted from a Node-RED flow that was running on my RPI for the last 18 months. I switched to this because Node-RED was starting to eat up resources as my flows became more numerous and complex.
 
 ## Features
 
-- **🌐 Web Interface**: Easy-to-use webapp for managing import rules
+- **🌐 Web Interface**: Webapp for managing import rules and payload mappings
 - **📋 Rule Management**: Create, edit, enable/disable import rules
-- **🎯 Selective Import**: Import only the data you need with flexible topic filtering
-- **📊 Real-time Status**: Monitor MQTT connection and message statistics
-- **🏷️ Flexible Topic Mapping**: Support for MQTT topic wildcards and auto-extraction of SignalK paths
-- **📦 Multiple Formats**: Support for object and value-only payloads
-- **🔍 Duplicate Filtering**: Optionally ignore duplicate messages to reduce SignalK updates
-- **🏷️ Source Labeling**: Customize source labels for imported data
+- **🎯 Selective Import**: Topic filtering with `+` / `#` wildcards and MMSI exclusion
+- **📦 Four Payload Formats**: `full`, `value-only`, `json-object`, and `custom-mapping`
+- **🗺️ Custom Payload Mapper**: Zigbee2MQTT-style JSON → multi-path SignalK deltas with per-field transforms and topic-wildcard placeholders (`{device}`, `{location}`, …)
+- **🔁 SignalK-native Unit Conversion**: Live-fetches the server's `/signalk/v1/unitpreferences/definitions` so every conversion the server knows about (including admin custom units) is available — no hardcoded table in the plugin
+- **🏷️ Meta Emission**: Custom mappings attach `meta: { units }` to each emitted value, enabling dashboards and unit-preference consumers downstream. A dedicated `Unitless` option tags paths with empty units without converting the value
+- **📊 Real-time Status**: MQTT connection and message statistics
+- **🔍 Duplicate Filtering**: Optionally ignore repeat messages
+- **🏷️ Source Labeling**: Customise `$source` per rule
 
 ## Installation
 
@@ -60,13 +62,27 @@ npm run dev
 ```
 signalk-mqtt-import/
 ├── src/
-│   ├── index.ts        # Main plugin file (TypeScript)
-│   └── types.ts        # TypeScript type definitions
-├── dist/               # Compiled JavaScript output
+│   ├── index.ts        # Plugin lifecycle, HTTP routes, MQTT wiring, unit-definitions loader
+│   ├── parsers.ts      # Pure payload parsers, transforms, topic/URN helpers
+│   ├── types.ts        # TypeScript type definitions
+│   └── __tests__/      # Vitest suite (excluded from dist)
+├── dist/               # Compiled JavaScript output (ships with the package)
 ├── public/             # Web interface files
 ├── package.json        # Dependencies and scripts
-└── tsconfig.json       # TypeScript configuration
+├── tsconfig.json       # TypeScript configuration
+├── CHANGELOG.md        # Per-release change log
+└── README.md
 ```
+
+### Testing
+
+```bash
+npm test          # run once
+npm run test:watch # watch mode
+npm run ci        # format:check + lint + test
+```
+
+Tests cover every ingestion pathway (value-only, json-object, full, custom-mapping), topic wildcard matching, MMSI exclusion, transforms (including definitions-driven SI conversion against a committed fixture of the `/signalk/v1/unitpreferences/definitions` response), rule dispatch, and the `/api/test-send` HTTP side-channel.
 
 ## Configuration
 
@@ -87,7 +103,7 @@ Navigate to **SignalK Admin → Server → Plugin Config → SignalK MQTT Import
 ## Web Interface
 
 Access the management interface at:
-- **http://your-signalk-server/signalk-mqtt-import/**
+- **http://your-signalk-server/plugins/signalk-mqtt-import/**
 
 (Port depends on your SignalK server configuration)
 
@@ -112,7 +128,8 @@ Access the management interface at:
 - **SignalK Context**: Target SignalK context (optional - can be extracted from topic)
 - **SignalK Path**: Target SignalK path (optional - can be extracted from topic)
 - **Source Label**: Label to use for the data source in SignalK
-- **Payload Format**: Expected format of MQTT messages (full, value-only, or json-object)
+- **Payload Format**: One of `full`, `value-only`, `json-object`, or `custom-mapping`
+- **Custom Mapping ID**: When `payload format = custom-mapping`, picks which saved Payload Mapper to use
 - **Ignore Duplicates**: Skip duplicate messages to reduce SignalK updates
 - **Exclude MMSI**: Comma-separated list of MMSI numbers to exclude from this rule
 
@@ -210,6 +227,21 @@ Get import statistics.
 }
 ```
 
+### POST /api/test-send
+Push an arbitrary SignalK delta through the plugin's `app.handleMessage` channel — useful for testing downstream subscribers without needing a matching MQTT rule.
+
+### GET / POST / DELETE /api/mappings
+CRUD for custom Payload Mappings (see Custom Mapping Format above). `POST` replaces the full list; `DELETE /api/mappings/:id` removes one by id.
+
+### POST /api/parse-payload
+Given `{ payload, topic }`, returns a list of `{ key, value, type, suggestedPath }` the webapp uses to auto-fill the field-mapping editor.
+
+### POST /api/test-mapping
+Given `{ payload, topic, mapping }`, runs the mapping through the same transform engine used at runtime and returns both the individual field results and the final SignalK delta — without emitting it.
+
+### GET /api/export-yaml / POST /api/import-yaml
+Bulk export/import of all rules + mappings as YAML. The webapp wires these to the Export/Import buttons.
+
 ## Integration with Export Plugin
 
 This plugin is designed to work seamlessly with the SignalK MQTT Export plugin:
@@ -297,6 +329,65 @@ Topic: `vessels/self/environment/outside/temperature`
 ```
 Results in: `environment.outside.temperature` = 25.5
 
+### Custom Mapping Format
+For devices that publish opaque JSON (Zigbee2MQTT, sensor hubs, etc.) where no direct topic→path relation exists, a **Payload Mapping** translates one MQTT message into multiple SignalK values with optional per-field transforms.
+
+Topic pattern: `zigbee2mqtt/+` (the `+` captures `{device}`)
+
+Sample payload on `zigbee2mqtt/StateRoomPortHoleStbd`:
+```json
+{
+  "battery": 87,
+  "contact": false,
+  "temperature": 22.5,
+  "linkquality": 102
+}
+```
+
+Field mapping (configured in the Payload Mapper):
+
+| Source | SignalK Path | Transform | Emitted value | Emitted meta |
+|---|---|---|---|---|
+| `battery` | `sensors.{device}.battery` | Unit (% → ratio) | 0.87 | `{ units: "ratio" }` |
+| `contact` | `sensors.{device}.status` | Boolean Map (true→open, false→closed) | `"closed"` | — |
+| `temperature` | `sensors.{device}.temperature` | Unit (C → K) | 295.65 | `{ units: "K" }` |
+| `linkquality` | `sensors.{device}.linkquality` | Unitless | 102 | `{ units: "" }` |
+
+Resulting delta:
+```json
+{
+  "context": "vessels.self",
+  "updates": [{
+    "$source": "zigbee",
+    "timestamp": "…",
+    "values": [
+      { "path": "sensors.StateRoomPortHoleStbd.battery", "value": 0.87 },
+      { "path": "sensors.StateRoomPortHoleStbd.status", "value": "closed" },
+      { "path": "sensors.StateRoomPortHoleStbd.temperature", "value": 295.65 },
+      { "path": "sensors.StateRoomPortHoleStbd.linkquality", "value": 102 }
+    ],
+    "meta": [
+      { "path": "sensors.StateRoomPortHoleStbd.battery", "value": { "units": "ratio" } },
+      { "path": "sensors.StateRoomPortHoleStbd.temperature", "value": { "units": "K" } },
+      { "path": "sensors.StateRoomPortHoleStbd.linkquality", "value": { "units": "" } }
+    ]
+  }]
+}
+```
+
+### Transform Types (custom mappings only)
+
+| Type | Behaviour | Meta emitted |
+|---|---|---|
+| `none` | Value passes through unchanged | — |
+| `unitless` | Value passes through unchanged | `{ units: "" }` |
+| `boolean-map` | `true`/`false` → configured strings | — |
+| `math` | `multiply`/`divide`/`add`/`subtract` with a scalar operand | — |
+| `unit` | `fromUnit → baseUnit` via the server's `inverseFormula` (mathjs); legacy `toUnit` still accepted | `{ units: "<baseUnit>" }` |
+| `expression` | `evaluate(<mathjs expression>, { value })` | — |
+
+The `unit` transform's dropdowns are populated live from `/signalk/v1/unitpreferences/definitions`, so any custom units the server admin defines are immediately usable.
+
 ## Troubleshooting
 
 ### Common Issues
@@ -342,22 +433,4 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ## Changelog
 
-### v0.5.0-beta.1 (Beta Release)
-- **📝 Improved documentation** with formatted JSON examples for better readability
-- **🔄 Version bump** to beta status indicating stable feature set
-- **✨ Ready for broader testing** with all core features implemented
-
-### v0.5.0-alpha.2 (TypeScript Conversion)
-- **🎯 Complete TypeScript conversion** with full type safety
-- **📝 Comprehensive type definitions** for all data structures
-- **🔍 Enhanced IDE support** with autocomplete and error detection
-- **🏗️ Improved architecture** with well-defined interfaces
-- **⚡ Better performance** with optimized compilation
-- **🐛 Bug fixes** and improved error handling
-- **📚 Enhanced documentation** with type-aware examples
-
-### v0.5.0-alpha.1 (JavaScript)
-- Original JavaScript implementation
-- Basic MQTT import functionality
-- Web interface for rule management
-- Self vessel detection and MMSI exclusion
+See [CHANGELOG.md](CHANGELOG.md) for the full per-release history.
