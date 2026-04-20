@@ -117,7 +117,26 @@ export interface PluginState {
   rulesFilePath: string | null;
   mappingsFilePath: string | null;
   currentConfig?: MQTTImportConfig;
+  unitDefinitions: UnitDefinitions | null;
 }
+
+// SignalK unit-conversion definitions
+// Shape mirrors GET /signalk/v1/unitpreferences/definitions exposed by
+// signalk-server (see server src/interfaces/unitpreferences-api.js).
+export interface UnitConversion {
+  formula: string; // SI -> target, mathjs expression over `value`
+  inverseFormula: string; // target -> SI, mathjs expression over `value`
+  symbol?: string;
+  longName?: string;
+  key?: string;
+}
+
+export interface UnitDefinition {
+  longName?: string;
+  conversions: Record<string, UnitConversion>;
+}
+
+export type UnitDefinitions = Record<string, UnitDefinition>;
 
 // MQTT Client Options
 export interface MQTTClientOptions {
@@ -243,7 +262,13 @@ export interface PersistentStorage {
 
 // Value transformation configuration
 export interface ValueTransform {
-  type: 'none' | 'boolean-map' | 'math' | 'unit' | 'expression';
+  type:
+    | 'none'
+    | 'unitless'
+    | 'boolean-map'
+    | 'math'
+    | 'unit'
+    | 'expression';
   config: {
     // For boolean-map
     trueValue?: any;
@@ -251,8 +276,11 @@ export interface ValueTransform {
     // For math operations
     operation?: 'multiply' | 'divide' | 'add' | 'subtract';
     operand?: number;
-    // For unit conversions
+    // For unit conversions: fromUnit is the payload's unit; baseUnit is
+    // the SignalK SI target (e.g. "K", "Pa"). `toUnit` is a legacy alias
+    // kept for backward compatibility with rules saved pre-0.5.2.
     fromUnit?: string;
+    baseUnit?: string;
     toUnit?: string;
     // For custom expressions (advanced)
     expression?: string;

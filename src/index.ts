@@ -1,9 +1,10 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import * as http from 'http';
+import * as https from 'https';
 import { Router } from 'express';
 import { connect } from 'mqtt';
 import * as yaml from 'js-yaml';
-import { evaluate } from 'mathjs';
 import {
   SignalKApp,
   SignalKPlugin,
@@ -20,9 +21,7 @@ import {
   RuleUpdateRequest,
   MQTTClientOptions,
   PayloadMapping,
-  FieldMapping,
   ValueTransform,
-  PlaceholderValues,
   MappingsApiResponse,
   ParsePayloadRequest,
   ParsePayloadResponse,
@@ -31,7 +30,9 @@ import {
   YamlExportData,
   YamlImportRequest,
   YamlImportResponse,
+  UnitDefinitions,
 } from './types';
+import * as parsers from './parsers';
 
 // Global plugin state
 
@@ -57,7 +58,24 @@ export = function (app: SignalKApp): SignalKPlugin {
     rulesFilePath: null,
     mappingsFilePath: null,
     currentConfig: undefined,
+    unitDefinitions: null,
   };
+
+  let unitPrefsListener: (() => void) | null = null;
+
+  // Build a parser context snapshot. State is read at call time so
+  // live changes to self-URN, topic prefix, mappings, and fetched unit
+  // definitions are always reflected.
+  function getParseContext(): parsers.ParseContext {
+    return {
+      debug: app.debug,
+      selfVesselUrn: state.selfVesselUrn,
+      topicPrefix: state.currentConfig?.topicPrefix || '',
+      unitDefinitions: state.unitDefinitions,
+      getMappingById: (id: string) =>
+        state.payloadMappings.find(m => m.id === id),
+    };
+  }
 
   plugin.start = function (options: Partial<MQTTImportConfig>): void {
     app.debug('Starting SignalK MQTT Import Manager plugin');
@@ -103,6 +121,17 @@ export = function (app: SignalKApp): SignalKPlugin {
       return;
     }
 
+    // Fetch the server's unit-conversion definitions so the `unit`
+    // transform can honour any custom units the admin has defined.
+    loadUnitDefinitions();
+
+    // Re-fetch when the server emits a unit-preferences change.
+    const anyApp = app as any;
+    if (typeof anyApp.on === 'function') {
+      unitPrefsListener = () => loadUnitDefinitions();
+      anyApp.on('unitpreferencesChanged', unitPrefsListener);
+    }
+
     // Initialize MQTT client
     initializeMQTTClient(config);
 
@@ -111,6 +140,12 @@ export = function (app: SignalKApp): SignalKPlugin {
 
   plugin.stop = function (): void {
     app.debug('Stopping SignalK MQTT Import Manager plugin');
+
+    const anyApp = app as any;
+    if (unitPrefsListener && typeof anyApp.off === 'function') {
+      anyApp.off('unitpreferencesChanged', unitPrefsListener);
+    }
+    unitPrefsListener = null;
 
     // Disconnect MQTT client
     if (state.mqttClient) {
@@ -121,6 +156,61 @@ export = function (app: SignalKApp): SignalKPlugin {
     state.lastReceivedMessages.clear();
     app.debug('SignalK MQTT Import Manager plugin stopped');
   };
+
+  // Fetch the server's unit-conversion definitions via self-HTTP.
+  // This mirrors `getMergedDefinitions()` in signalk-server and includes
+  // both built-in and any admin-added custom units.
+  function loadUnitDefinitions(): void {
+    const anyApp = app as any;
+    const settings = anyApp?.config?.settings || {};
+    const ssl = !!settings.ssl;
+    const port =
+      Number(process.env?.PORT) ||
+      (ssl ? settings.sslport || 3443 : settings.port || 3000);
+    const proto = ssl ? https : http;
+
+    const req = proto.get(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/signalk/v1/unitpreferences/definitions',
+        headers: { accept: 'application/json' },
+        timeout: 5000,
+      },
+      res => {
+        const chunks: Buffer[] = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            app.debug(
+              `Unit definitions fetch returned ${res.statusCode}; leaving cache empty`
+            );
+            return;
+          }
+          try {
+            const body = Buffer.concat(chunks).toString('utf8');
+            const parsed = JSON.parse(body) as UnitDefinitions;
+            state.unitDefinitions = parsed;
+            const baseCount = Object.keys(parsed).length;
+            app.debug(
+              `Loaded ${baseCount} SI unit base definitions from SignalK server`
+            );
+          } catch (error) {
+            app.debug(
+              `Failed to parse unit definitions: ${(error as Error).message}`
+            );
+          }
+        });
+      }
+    );
+
+    req.on('timeout', () => {
+      req.destroy(new Error('timeout'));
+    });
+    req.on('error', (error: Error) => {
+      app.debug(`Failed to fetch unit definitions: ${error.message}`);
+    });
+  }
 
   // Initialize MQTT client
   function initializeMQTTClient(config: MQTTImportConfig): void {
@@ -328,42 +418,12 @@ export = function (app: SignalKApp): SignalKPlugin {
     rule: ImportRule,
     topic: string
   ): SignalKDelta | null {
-    try {
-      let value: any;
-
-      // Try to parse as JSON first
-      try {
-        value = JSON.parse(messageStr);
-      } catch {
-        // If not JSON, treat as string/number
-        value = isNaN(Number(messageStr)) ? messageStr : Number(messageStr);
-      }
-
-      // Extract context and path from topic or rule configuration
-      const context = rule.signalKContext || extractContextFromTopic(topic);
-      const path = rule.signalKPath || extractPathFromTopic(topic);
-
-      return {
-        context: context as any,
-        updates: [
-          {
-            $source: rule.sourceLabel || 'mqtt-import',
-            timestamp: new Date().toISOString() as any,
-            values: [
-              {
-                path: path as any,
-                value: value,
-              },
-            ],
-          } as any,
-        ],
-      };
-    } catch (error) {
-      app.debug(
-        `Error parsing value-only message: ${(error as Error).message}`
-      );
-      return null;
-    }
+    return parsers.parseValueOnlyMessage(
+      messageStr,
+      rule,
+      topic,
+      getParseContext()
+    );
   }
 
   // Parse JSON object message format - each key becomes a separate path
@@ -372,45 +432,12 @@ export = function (app: SignalKApp): SignalKPlugin {
     rule: ImportRule,
     topic: string
   ): SignalKDelta | null {
-    try {
-      const jsonObject = JSON.parse(messageStr);
-
-      // Ensure it's an object (not array or primitive)
-      if (
-        typeof jsonObject !== 'object' ||
-        jsonObject === null ||
-        Array.isArray(jsonObject)
-      ) {
-        app.debug('JSON object format requires a valid JSON object');
-        return null;
-      }
-
-      // Extract base context and path from topic or rule configuration
-      const context = rule.signalKContext || extractContextFromTopic(topic);
-      const basePath = rule.signalKPath || extractPathFromTopic(topic);
-
-      // Create a value entry for each key in the JSON object
-      const values = Object.entries(jsonObject).map(([key, value]) => ({
-        path: `${basePath}.${key}` as any,
-        value: value as any,
-      }));
-
-      return {
-        context: context as any,
-        updates: [
-          {
-            $source: rule.sourceLabel || 'mqtt-import',
-            timestamp: new Date().toISOString() as any,
-            values: values,
-          } as any,
-        ],
-      };
-    } catch (error) {
-      app.debug(
-        `Error parsing JSON object message: ${(error as Error).message}`
-      );
-      return null;
-    }
+    return parsers.parseJsonObjectMessage(
+      messageStr,
+      rule,
+      topic,
+      getParseContext()
+    );
   }
 
   // Parse full SignalK message format
@@ -419,219 +446,44 @@ export = function (app: SignalKApp): SignalKPlugin {
     rule: ImportRule,
     topic: string
   ): SignalKDelta | null {
-    try {
-      const parsed = JSON.parse(messageStr);
-
-      // If it's already a proper SignalK delta, use it directly
-      if (parsed.context && parsed.updates) {
-        return parsed as SignalKDelta;
-      }
-
-      // Otherwise, try to construct a SignalK delta
-      const context =
-        rule.signalKContext || parsed.context || extractContextFromTopic(topic);
-      const path = rule.signalKPath || extractPathFromTopic(topic);
-
-      return {
-        context: context as any,
-        updates: [
-          {
-            $source: rule.sourceLabel || 'mqtt-import',
-            timestamp: new Date().toISOString() as any,
-            values: [
-              {
-                path: path as any,
-                value: parsed,
-              },
-            ],
-          } as any,
-        ],
-      };
-    } catch (error) {
-      app.debug(
-        `Error parsing full SignalK message: ${(error as Error).message}`
-      );
-      return null;
-    }
+    return parsers.parseFullSignalKMessage(
+      messageStr,
+      rule,
+      topic,
+      getParseContext()
+    );
   }
 
-  // Helper function to convert URN format for MQTT topics
-  function urnToMqttFormat(urn: string): string {
-    if (!urn) return '';
-    // Convert urn:mrn:imo:mmsi:368396230 to urn_mrn_imo_mmsi_368396230
-    return urn.replace(/:/g, '_');
-  }
+  // Thin wrappers that close over plugin state/app and delegate to
+  // the pure implementations in ./parsers.
+  const urnToMqttFormat = parsers.urnToMqttFormat;
+  const extractMMSIFromUrn = parsers.extractMMSIFromUrn;
 
-  // Helper function to convert MQTT format back to URN
-  function mqttFormatToUrn(mqttFormat: string): string {
-    if (!mqttFormat) return '';
-    // Convert urn_mrn_imo_mmsi_368396230 to urn:mrn:imo:mmsi:368396230
-    return mqttFormat.replace(/_/g, ':');
-  }
-
-  // Helper function to extract MMSI from URN
-  function extractMMSIFromUrn(urn: string): string | null {
-    if (!urn) return null;
-    // Extract MMSI from urn:mrn:imo:mmsi:368396230 or urn_mrn_imo_mmsi_368396230
-    const match = urn.match(/urn[_:]+mrn[_:]+imo[_:]+mmsi[_:]+([0-9]+)/);
-    return match ? match[1] : null;
-  }
-
-  // Helper function to parse MMSI exclusion list
-  function parseMMSIExclusionList(excludeMMSI: string): string[] {
-    if (!excludeMMSI || typeof excludeMMSI !== 'string') return [];
-    return excludeMMSI
-      .split(',')
-      .map(mmsi => mmsi.trim())
-      .filter(mmsi => mmsi.length > 0);
-  }
-
-  // Helper function to match MQTT topics with wildcard patterns
   function mqttTopicMatches(
     topic: string,
     pattern: string,
     selfVesselUrn?: string | null
   ): boolean {
-    // Handle vessels/self/* patterns by expanding to all possible formats
-    if (pattern.includes('vessels/self/') && selfVesselUrn) {
-      // Create patterns for URN format and underscore format
-      const urnPattern = pattern.replace(
-        'vessels/self/',
-        `vessels/${selfVesselUrn}/`
-      );
-      const underscoreUrn = urnToMqttFormat(selfVesselUrn);
-      const underscorePattern = pattern.replace(
-        'vessels/self/',
-        `vessels/${underscoreUrn}/`
-      );
-
-      // Test against all possible patterns
-      return (
-        mqttTopicMatches(
-          topic,
-          pattern.replace('vessels/self/', 'vessels/+/')
-        ) ||
-        mqttTopicMatches(topic, urnPattern) ||
-        (underscoreUrn ? mqttTopicMatches(topic, underscorePattern) : false)
-      );
-    }
-
-    // Convert MQTT pattern to regex pattern
-    let regexPattern = pattern
-      .replace(/\+/g, '[^/]+') // + matches any characters except /
-      .replace(/#$/, '.*') // # at end matches everything
-      .replace(/#\//, '.*/'); // # in middle matches everything up to next /
-
-    // Also handle URN format conversion (underscore to colon)
-    const colonPattern = pattern.replace(
-      /urn_mrn_imo_mmsi_/g,
-      'urn:mrn:imo:mmsi:'
-    );
-    let colonRegexPattern = '';
-    if (colonPattern !== pattern) {
-      colonRegexPattern = colonPattern
-        .replace(/\+/g, '[^/]+')
-        .replace(/#$/, '.*')
-        .replace(/#\//, '.*/');
-    }
-
-    // Create regex objects with anchors
-    const regex = new RegExp(`^${regexPattern}$`);
-    const colonRegex = colonRegexPattern
-      ? new RegExp(`^${colonRegexPattern}$`)
-      : null;
-
-    // Test both underscore and colon formats
-    return regex.test(topic) || (colonRegex ? colonRegex.test(topic) : false);
+    return parsers.mqttTopicMatches(topic, pattern, selfVesselUrn);
   }
 
-  // Helper function to check if MMSI should be excluded
   function isMMSIExcluded(topic: string, rule: ImportRule): boolean {
-    const exclusionList = parseMMSIExclusionList(rule.excludeMMSI || '');
-    if (exclusionList.length === 0) return false;
-
-    // Extract vessel ID from topic
-    const parts = topic.split('/');
-    if (parts.length < 2 || parts[0] !== 'vessels') return false;
-
-    const vesselId = parts[1];
-    const mmsi = extractMMSIFromUrn(vesselId);
-
-    if (!mmsi) return false;
-
-    const isExcluded = exclusionList.includes(mmsi);
-
-    if (isExcluded) {
-      app.debug(
-        `MMSI ${mmsi} excluded by rule "${rule.name}" for topic: ${topic}`
-      );
-    }
-
-    return isExcluded;
+    return parsers.isMMSIExcluded(topic, rule, app.debug);
   }
 
-  // Extract SignalK context from MQTT topic
   function extractContextFromTopic(topic: string): string {
-    // Remove prefix if present
-    let cleanTopic = topic;
-    if (state.currentConfig?.topicPrefix) {
-      cleanTopic = cleanTopic.replace(
-        `${state.currentConfig.topicPrefix}/`,
-        ''
-      );
-    }
-
-    const parts = cleanTopic.split('/');
-
-    if (parts[0] === 'vessels' && parts.length > 2) {
-      const vesselId = parts[1];
-
-      // Check if this is the self vessel's URN (handle both formats)
-      if (
-        state.selfVesselUrn &&
-        (urnToMqttFormat(state.selfVesselUrn) === vesselId ||
-          state.selfVesselUrn === vesselId)
-      ) {
-        return 'vessels.self';
-      }
-
-      // Handle URN format (both underscore and colon)
-      if (vesselId.startsWith('urn_')) {
-        return `vessels.${mqttFormatToUrn(vesselId)}`;
-      } else if (vesselId.startsWith('urn:')) {
-        return `vessels.${vesselId}`;
-      }
-
-      // Handle other formats
-      return `vessels.${vesselId}`;
-    }
-
-    // Fallback to vessels.self
-    return 'vessels.self';
+    return parsers.extractContextFromTopic(
+      topic,
+      state.currentConfig?.topicPrefix || '',
+      state.selfVesselUrn
+    );
   }
 
-  // Extract SignalK path from MQTT topic
   function extractPathFromTopic(topic: string): string {
-    // Remove prefix if present
-    let cleanTopic = topic;
-    if (state.currentConfig?.topicPrefix) {
-      cleanTopic = cleanTopic.replace(
-        `${state.currentConfig.topicPrefix}/`,
-        ''
-      );
-    }
-
-    // Default path extraction: convert topic to SignalK path
-    // e.g., "vessels/self/navigation/position" -> "navigation.position"
-    const parts = cleanTopic.split('/');
-
-    // Remove context parts (vessels/self or vessels/urn_...)
-    if (parts[0] === 'vessels' && parts.length > 2) {
-      return parts.slice(2).join('.');
-    }
-
-    // Fallback: use the entire topic as path
-    return cleanTopic.replace(/\//g, '.');
+    return parsers.extractPathFromTopic(
+      topic,
+      state.currentConfig?.topicPrefix || ''
+    );
   }
 
   // Send data to SignalK
@@ -1366,228 +1218,29 @@ export = function (app: SignalKApp): SignalKPlugin {
     return state.payloadMappings.find((m) => m.id === mappingId);
   }
 
-  // ============================================
-  // Placeholder Extraction Functions
-  // ============================================
-
-  // Default placeholder names for wildcards in order
-  const PLACEHOLDER_NAMES = ['device', 'location', 'sensor', 'type', 'id'];
-
-  function extractPlaceholdersFromTopic(
-    topicPattern: string,
-    actualTopic: string
-  ): PlaceholderValues {
-    const placeholders: PlaceholderValues = {};
-
-    // Split pattern and actual topic into segments
-    const patternParts = topicPattern.split('/');
-    const topicParts = actualTopic.split('/');
-
-    let placeholderIndex = 0;
-
-    for (let i = 0; i < patternParts.length && i < topicParts.length; i++) {
-      if (patternParts[i] === '+') {
-        // Single-level wildcard - capture this segment
-        const placeholderName =
-          PLACEHOLDER_NAMES[placeholderIndex] || `placeholder${placeholderIndex}`;
-        placeholders[placeholderName] = topicParts[i];
-        placeholderIndex++;
-      } else if (patternParts[i] === '#') {
-        // Multi-level wildcard - capture remaining segments joined
-        const remaining = topicParts.slice(i).join('/');
-        const placeholderName =
-          PLACEHOLDER_NAMES[placeholderIndex] || `placeholder${placeholderIndex}`;
-        placeholders[placeholderName] = remaining;
-        break;
-      }
-    }
-
-    return placeholders;
-  }
-
-  function applyPlaceholders(
-    pathTemplate: string,
-    placeholders: PlaceholderValues
-  ): string {
-    let result = pathTemplate;
-    for (const [key, value] of Object.entries(placeholders)) {
-      result = result.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
-    }
-    return result;
-  }
-
-  // ============================================
-  // Value Transform Functions
-  // ============================================
+  // Placeholder / transform / custom-mapping helpers — delegate to the
+  // pure implementations in ./parsers.
+  const extractPlaceholdersFromTopic = parsers.extractPlaceholdersFromTopic;
+  const applyPlaceholders = parsers.applyPlaceholders;
 
   function applyTransform(value: any, transform: ValueTransform): any {
-    if (!transform || transform.type === 'none') {
-      return value;
-    }
-
-    const config = transform.config || {};
-
-    switch (transform.type) {
-      case 'boolean-map':
-        if (typeof value === 'boolean') {
-          return value ? config.trueValue : config.falseValue;
-        }
-        // Handle truthy/falsy values
-        return value ? config.trueValue : config.falseValue;
-
-      case 'math':
-        const numValue = Number(value);
-        if (isNaN(numValue)) {
-          app.debug(`Cannot apply math transform to non-numeric value: ${value}`);
-          return value;
-        }
-        const operand = config.operand || 0;
-        switch (config.operation) {
-          case 'multiply':
-            return numValue * operand;
-          case 'divide':
-            return operand !== 0 ? numValue / operand : numValue;
-          case 'add':
-            return numValue + operand;
-          case 'subtract':
-            return numValue - operand;
-          default:
-            return numValue;
-        }
-
-      case 'unit':
-        // Unit conversions
-        const fromUnit = config.fromUnit || '';
-        const toUnit = config.toUnit || '';
-        const num = Number(value);
-        if (isNaN(num)) return value;
-
-        // Common conversions
-        if (fromUnit === 'C' && toUnit === 'K') {
-          return num + 273.15; // Celsius to Kelvin
-        }
-        if (fromUnit === 'mV' && toUnit === 'V') {
-          return num / 1000; // millivolts to volts
-        }
-        if (fromUnit === '%' && toUnit === 'ratio') {
-          return num / 100; // percentage to ratio
-        }
-        if (fromUnit === 'F' && toUnit === 'K') {
-          return (num - 32) * (5 / 9) + 273.15; // Fahrenheit to Kelvin
-        }
-        if (fromUnit === 'hPa' && toUnit === 'Pa') {
-          return num * 100; // hectopascals to pascals
-        }
-        return num;
-
-      case 'expression':
-        // Custom math expression using mathjs (safe - no arbitrary code execution)
-        if (config.expression) {
-          try {
-            return evaluate(config.expression, { value });
-          } catch (error) {
-            app.debug(
-              `Error evaluating expression: ${(error as Error).message}`
-            );
-            return value;
-          }
-        }
-        return value;
-
-      default:
-        return value;
-    }
+    return parsers.applyTransform(value, transform, {
+      debug: app.debug,
+      unitDefinitions: state.unitDefinitions,
+    });
   }
-
-  // ============================================
-  // Custom Mapping Message Handler
-  // ============================================
 
   function parseCustomMappingMessage(
     messageStr: string,
     rule: ImportRule,
     topic: string
   ): SignalKDelta | null {
-    if (!rule.customMappingId) {
-      app.debug('Custom mapping rule missing customMappingId');
-      return null;
-    }
-
-    const mapping = getMappingById(rule.customMappingId);
-    if (!mapping) {
-      app.debug(`Mapping not found: ${rule.customMappingId}`);
-      return null;
-    }
-
-    try {
-      const jsonObject = JSON.parse(messageStr);
-
-      if (
-        typeof jsonObject !== 'object' ||
-        jsonObject === null ||
-        Array.isArray(jsonObject)
-      ) {
-        app.debug('Custom mapping format requires a valid JSON object');
-        return null;
-      }
-
-      // Extract placeholders from topic
-      const placeholders = extractPlaceholdersFromTopic(
-        mapping.topicPattern,
-        topic
-      );
-
-      // Process each field mapping
-      const values: Array<{ path: any; value: any }> = [];
-
-      for (const fieldMapping of mapping.fieldMappings) {
-        if (!fieldMapping.enabled) continue;
-
-        const sourceValue = jsonObject[fieldMapping.sourceKey];
-        if (sourceValue === undefined) continue;
-
-        // Apply value transform
-        const transformedValue = applyTransform(
-          sourceValue,
-          fieldMapping.transform
-        );
-
-        // Apply placeholders to path
-        const finalPath = applyPlaceholders(
-          fieldMapping.signalKPath,
-          placeholders
-        );
-
-        values.push({
-          path: finalPath as any,
-          value: transformedValue,
-        });
-      }
-
-      if (values.length === 0) {
-        app.debug('No values extracted from custom mapping');
-        return null;
-      }
-
-      const context = mapping.signalKContext || rule.signalKContext || 'vessels.self';
-      const sourceLabel = rule.sourceLabel || 'mqtt-import-custom';
-
-      return {
-        context: context as any,
-        updates: [
-          {
-            $source: sourceLabel,
-            timestamp: new Date().toISOString() as any,
-            values: values,
-          } as any,
-        ],
-      };
-    } catch (error) {
-      app.debug(
-        `Error parsing custom mapping message: ${(error as Error).message}`
-      );
-      return null;
-    }
+    return parsers.parseCustomMappingMessage(
+      messageStr,
+      rule,
+      topic,
+      getParseContext()
+    );
   }
 
   // ============================================

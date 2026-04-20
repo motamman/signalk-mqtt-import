@@ -1484,11 +1484,99 @@
         let currentMappings = [];
         let currentParsedFields = [];
         let editingMappingId = null;
+        // Cached SignalK unit definitions — loaded once on page load from
+        // the server's /signalk/v1/unitpreferences/definitions endpoint so
+        // we don't carry our own conversion table.
+        let unitDefinitions = null;
 
         // Initialize mappings on page load
         document.addEventListener('DOMContentLoaded', function() {
             refreshMappings();
+            loadUnitDefinitions();
         });
+
+        async function loadUnitDefinitions() {
+            try {
+                const response = await fetch('/signalk/v1/unitpreferences/definitions');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                unitDefinitions = await response.json();
+            } catch (error) {
+                addLog('Could not load SignalK unit definitions: ' + error.message);
+                unitDefinitions = null;
+            }
+        }
+
+        // SignalK base units that are not numeric and don't belong in
+        // a Unit Conversion dropdown: booleans, the "tabula rasa"
+        // no-unit sentinel, and the three datetime types the server
+        // itself special-cases (see signalk-server
+        // src/interfaces/unitpreferences-api.js:97-101).
+        const NON_NUMERIC_BASES = new Set([
+            'bool',
+            'tr',
+            'Epoch Seconds',
+            'ISO-8601 (UTC)',
+            'RFC 3339 (UTC)',
+        ]);
+
+        // Build the <select> option list for SI base units. Includes
+        // every numeric base the server publishes — even ones with only
+        // an identity conversion (e.g. V, A) — so a user can still pick
+        // them to attach units metadata without any numeric change.
+        function buildBaseUnitOptions(selected) {
+            const placeholder = `<option value=""${selected ? '' : ' selected'}>-- Select SI unit --</option>`;
+            if (!unitDefinitions) {
+                return `<option value="" selected>(definitions not loaded)</option>`;
+            }
+            const opts = Object.keys(unitDefinitions)
+                .filter(base => !NON_NUMERIC_BASES.has(base))
+                .sort()
+                .map(base => {
+                    const name = unitDefinitions[base].longName || base;
+                    const isSel = base === selected ? ' selected' : '';
+                    return `<option value="${base}"${isSel}>${name} (${base})</option>`;
+                })
+                .join('');
+            return placeholder + opts;
+        }
+
+        // Build the <select> option list of source units that convert
+        // into `baseUnit`. Keeps the identity entry (e.g. K → K) so a
+        // user whose payload is already in SI can still pick it and
+        // have metadata emitted. Returns a disabled placeholder until
+        // a base unit is picked.
+        function buildFromUnitOptions(baseUnit, selected) {
+            if (!unitDefinitions || !baseUnit || !unitDefinitions[baseUnit]) {
+                return `<option value="" selected>-- Pick SI unit first --</option>`;
+            }
+            const placeholder = `<option value=""${selected ? '' : ' selected'}>-- Select source unit --</option>`;
+            const opts = Object.keys(unitDefinitions[baseUnit].conversions || {})
+                .sort()
+                .map(k => {
+                    const c = unitDefinitions[baseUnit].conversions[k];
+                    const sym = c.symbol || k;
+                    const long = c.longName ? ` — ${c.longName}` : '';
+                    const isIdentity = k === baseUnit;
+                    const label = isIdentity
+                        ? `${sym} — already SI (no conversion, just tag units)`
+                        : `${sym}${long}`;
+                    const isSel = k === selected ? ' selected' : '';
+                    return `<option value="${k}"${isSel}>${label}</option>`;
+                })
+                .join('');
+            return placeholder + opts;
+        }
+
+        // Repopulate a row's fromUnit dropdown when the user picks a
+        // different baseUnit.
+        function onBaseUnitChange(index) {
+            const configDiv = document.getElementById(`transformConfig_${index}`);
+            if (!configDiv) return;
+            const baseSelect = configDiv.querySelector('.transform-baseUnit');
+            const fromSelect = configDiv.querySelector('.transform-fromUnit');
+            if (!baseSelect || !fromSelect) return;
+            fromSelect.innerHTML = buildFromUnitOptions(baseSelect.value, null);
+        }
 
         // Toggle custom mapping selector visibility
         function toggleCustomMappingSelector() {
@@ -1612,6 +1700,7 @@
                         <td>
                             <select class="field-transform" onchange="updateTransformConfig(${index}, this.value)">
                                 <option value="none">None</option>
+                                <option value="unitless">Unitless (tag with empty units)</option>
                                 <option value="boolean-map">Boolean Map</option>
                                 <option value="math">Math Operation</option>
                                 <option value="unit">Unit Conversion</option>
@@ -1654,23 +1743,19 @@
                         <input type="number" class="transform-operand" placeholder="Value" style="width:70px;" step="any">
                     `;
                     break;
-                case 'unit':
+                case 'unit': {
+                    const baseOptions = buildBaseUnitOptions(null);
                     html = `
-                        <select class="transform-fromUnit">
-                            <option value="C">°C</option>
-                            <option value="F">°F</option>
-                            <option value="mV">mV</option>
-                            <option value="%">%</option>
-                            <option value="hPa">hPa</option>
-                        </select>
+                        <label>Source:</label>
+                        <select class="transform-fromUnit"></select>
                         <span>→</span>
-                        <select class="transform-toUnit">
-                            <option value="K">K (Kelvin)</option>
-                            <option value="V">V (Volts)</option>
-                            <option value="ratio">Ratio (0-1)</option>
-                            <option value="Pa">Pa</option>
-                        </select>
+                        <label>SI:</label>
+                        <select class="transform-baseUnit" onchange="onBaseUnitChange(${index})">${baseOptions}</select>
                     `;
+                    break;
+                }
+                case 'unitless':
+                    html = `<small style="color:#666;">Value imported as-is. Metadata will tag the path with <code>units: ""</code>.</small>`;
                     break;
                 default:
                     html = '';
@@ -1678,6 +1763,10 @@
 
             configDiv.innerHTML = html;
             configDiv.className = transformType !== 'none' ? 'transform-config active' : 'transform-config';
+
+            // Populate the dependent fromUnit dropdown for a freshly
+            // rendered unit transform.
+            if (transformType === 'unit') onBaseUnitChange(index);
         }
 
         // Toggle all field checkboxes
@@ -1695,6 +1784,7 @@
 
             const fieldMappings = [];
             const rows = document.querySelectorAll('#mappingEditorBody tr');
+            const incompleteUnitRows = [];
 
             rows.forEach((row, index) => {
                 const enabled = row.querySelector('.field-enabled').checked;
@@ -1713,8 +1803,13 @@
                     transform.config.operation = configDiv.querySelector('.transform-operation')?.value || 'multiply';
                     transform.config.operand = parseFloat(configDiv.querySelector('.transform-operand')?.value) || 1;
                 } else if (transformType === 'unit') {
-                    transform.config.fromUnit = configDiv.querySelector('.transform-fromUnit')?.value || '';
-                    transform.config.toUnit = configDiv.querySelector('.transform-toUnit')?.value || '';
+                    const fromUnit = configDiv.querySelector('.transform-fromUnit')?.value || '';
+                    const baseUnit = configDiv.querySelector('.transform-baseUnit')?.value || '';
+                    transform.config.fromUnit = fromUnit;
+                    transform.config.baseUnit = baseUnit;
+                    if (enabled && (!fromUnit || !baseUnit)) {
+                        incompleteUnitRows.push(currentParsedFields[index]?.key || path);
+                    }
                 }
 
                 fieldMappings.push({
@@ -1724,6 +1819,15 @@
                     enabled: enabled
                 });
             });
+
+            if (incompleteUnitRows.length) {
+                alert(
+                    'Unit Conversion is missing Source or SI unit for:\n  - '
+                    + incompleteUnitRows.join('\n  - ')
+                    + '\n\nPick both, or change the transform to None.'
+                );
+                return null;
+            }
 
             return {
                 id: editingMappingId || Date.now().toString(),
@@ -1739,6 +1843,7 @@
         // Save mapping from editor
         async function saveMappingFromEditor() {
             const mapping = buildMappingFromEditor();
+            if (!mapping) return; // validation (e.g. incomplete unit config) already alerted
 
             if (!mapping.topicPattern) {
                 showNotification('Error', 'Please enter an MQTT topic pattern', 'error', 3000);
@@ -1826,6 +1931,7 @@
                         <td>
                             <select class="field-transform" onchange="updateTransformConfig(${index}, this.value)">
                                 <option value="none" ${transformType === 'none' ? 'selected' : ''}>None</option>
+                                <option value="unitless" ${transformType === 'unitless' ? 'selected' : ''}>Unitless (tag with empty units)</option>
                                 <option value="boolean-map" ${transformType === 'boolean-map' ? 'selected' : ''}>Boolean Map</option>
                                 <option value="math" ${transformType === 'math' ? 'selected' : ''}>Math Operation</option>
                                 <option value="unit" ${transformType === 'unit' ? 'selected' : ''}>Unit Conversion</option>
@@ -1858,10 +1964,17 @@
                         if (opSelect) opSelect.value = fm.transform.config.operation || 'multiply';
                         if (operandInput) operandInput.value = fm.transform.config.operand || '';
                     } else if (fm.transform.type === 'unit' && fm.transform.config) {
+                        const baseSelect = configDiv.querySelector('.transform-baseUnit');
                         const fromSelect = configDiv.querySelector('.transform-fromUnit');
-                        const toSelect = configDiv.querySelector('.transform-toUnit');
-                        if (fromSelect) fromSelect.value = fm.transform.config.fromUnit || 'C';
-                        if (toSelect) toSelect.value = fm.transform.config.toUnit || 'K';
+                        // Accept legacy `toUnit` as an alias for `baseUnit`.
+                        const baseUnit = fm.transform.config.baseUnit
+                            || fm.transform.config.toUnit
+                            || '';
+                        const fromUnit = fm.transform.config.fromUnit || '';
+                        if (baseSelect) baseSelect.value = baseUnit;
+                        if (fromSelect) {
+                            fromSelect.innerHTML = buildFromUnitOptions(baseUnit, fromUnit);
+                        }
                     }
                 }
             });
@@ -1898,6 +2011,7 @@
             const payload = document.getElementById('mapperPayload').value.trim();
             const sampleTopic = document.getElementById('mapperSampleTopic').value.trim();
             const mapping = buildMappingFromEditor();
+            if (!mapping) return;
 
             if (!payload) {
                 showNotification('Error', 'Please enter a payload to test', 'error', 3000);
@@ -1951,6 +2065,7 @@
             const payload = document.getElementById('mapperPayload').value.trim();
             const sampleTopic = document.getElementById('mapperSampleTopic').value.trim();
             const mapping = buildMappingFromEditor();
+            if (!mapping) return;
 
             if (!payload) {
                 showNotification('Error', 'Please enter a payload to test', 'error', 3000);
