@@ -3,6 +3,7 @@ import * as path from 'path';
 import { Router } from 'express';
 import { connect } from 'mqtt';
 import * as yaml from 'js-yaml';
+import { evaluate } from 'mathjs';
 import {
   SignalKApp,
   SignalKPlugin,
@@ -1480,12 +1481,10 @@ export = function (app: SignalKApp): SignalKPlugin {
         return num;
 
       case 'expression':
-        // Custom JavaScript expression (advanced)
+        // Custom math expression using mathjs (safe - no arbitrary code execution)
         if (config.expression) {
           try {
-            // Create a safe evaluation context
-            const evalFunc = new Function('value', `return ${config.expression}`);
-            return evalFunc(value);
+            return evaluate(config.expression, { value });
           } catch (error) {
             app.debug(
               `Error evaluating expression: ${(error as Error).message}`
